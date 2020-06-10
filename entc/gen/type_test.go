@@ -5,13 +5,11 @@
 package gen
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/facebookincubator/ent/entc/load"
 	"github.com/facebookincubator/ent/schema/field"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -63,6 +61,21 @@ func TestType(t *testing.T) {
 		},
 	})
 	require.Error(err, "empty value for enums")
+
+	_, err = NewType(&Config{Package: "entc/gen"}, &load.Schema{
+		Name: "T",
+		Fields: []*load.Field{
+			{Name: "", Info: &field.TypeInfo{Type: field.TypeInt}},
+		},
+	})
+	require.Error(err, "empty field name")
+
+	_, err = NewType(&Config{Package: "entc/gen"}, &load.Schema{Name: "Type"})
+	require.EqualError(err, "schema lowercase name conflicts with Go keyword \"type\"")
+	_, err = NewType(&Config{Package: "entc/gen"}, &load.Schema{Name: "Int"})
+	require.EqualError(err, "schema lowercase name conflicts with Go predeclared identifier \"int\"")
+	_, err = NewType(&Config{Package: "entc/gen"}, &load.Schema{Name: "Value"})
+	require.EqualError(err, "schema name conflicts with ent predeclared identifier \"Value\"")
 }
 
 func TestType_Label(t *testing.T) {
@@ -75,6 +88,7 @@ func TestType_Label(t *testing.T) {
 		{"PHBOrg", "phb_org"},
 		{"UserID", "user_id"},
 		{"HTTPCode", "http_code"},
+		{"UserIDs", "user_ids"},
 	}
 	for _, tt := range tests {
 		typ := &Type{Name: tt.name}
@@ -113,11 +127,26 @@ func TestType_Receiver(t *testing.T) {
 		{"PHBOrg", "po"},
 		{"DomainSpecificLang", "dospla"},
 		{"[]byte", "b"},
+		{"[16]byte", "b"},
+		{"UserPKey", "up"},
 	}
 	for _, tt := range tests {
 		typ := &Type{Name: tt.name, Config: &Config{Package: "entc/gen"}}
 		require.Equal(t, tt.receiver, typ.Receiver())
 	}
+}
+
+func TestType_WithRuntimeMixin(t *testing.T) {
+	position := &load.Position{MixedIn: true}
+	typ := &Type{
+		ID: &Field{},
+		Fields: []*Field{
+			{Default: true, Position: position},
+			{UpdateDefault: true, Position: position},
+			{Validators: 1, Position: position},
+		},
+	}
+	require.True(t, typ.RuntimeMixin())
 }
 
 func TestType_TagTypes(t *testing.T) {
@@ -170,7 +199,7 @@ func TestType_AddIndex(t *testing.T) {
 	)
 
 	err = typ.AddIndex(&load.Index{Unique: true})
-	require.Error(t, err, "missing fields")
+	require.Error(t, err, "missing fields or edges")
 
 	err = typ.AddIndex(&load.Index{Unique: true, Fields: []string{"unknown"}})
 	require.Error(t, err, "unknown field for index")
@@ -184,22 +213,14 @@ func TestType_AddIndex(t *testing.T) {
 	err = typ.AddIndex(&load.Index{Unique: true, Fields: []string{"name"}, Edges: []string{"next"}})
 	require.Error(t, err, "not an inverse edge for O2O relation")
 
+	err = typ.AddIndex(&load.Index{Unique: true, Edges: []string{"prev", "owner"}})
+	require.NoError(t, err, "valid index defined only on edges")
+
 	err = typ.AddIndex(&load.Index{Unique: true, Fields: []string{"name"}, Edges: []string{"prev"}})
 	require.NoError(t, err, "valid index on O2O relation and field")
 
 	err = typ.AddIndex(&load.Index{Unique: true, Fields: []string{"name"}, Edges: []string{"owner"}})
 	require.NoError(t, err, "valid index on M2O relation and field")
-}
-
-func TestField(t *testing.T) {
-	f := &Field{Type: &field.TypeInfo{Type: field.TypeTime}}
-	require.True(t, f.IsTime())
-	require.Equal(t, "time.Now()", f.ExampleCode())
-
-	require.Equal(t, "1", Field{Type: &field.TypeInfo{Type: field.TypeInt}}.ExampleCode())
-	require.Equal(t, "true", Field{Type: &field.TypeInfo{Type: field.TypeBool}}.ExampleCode())
-	require.Equal(t, "1", Field{Type: &field.TypeInfo{Type: field.TypeFloat64}}.ExampleCode())
-	require.Equal(t, "\"string\"", Field{Type: &field.TypeInfo{Type: field.TypeString}}.ExampleCode())
 }
 
 func TestField_Constant(t *testing.T) {
@@ -232,6 +253,22 @@ func TestField_DefaultName(t *testing.T) {
 	}
 }
 
+func TestBuilderField(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+	}{
+		{"active", "active"},
+		{"type", "_type"},
+		{"config", "_config"},
+		{"SSOCert", "_SSOCert"},
+	}
+	for _, tt := range tests {
+		require.Equal(t, tt.field, Edge{Name: tt.name}.BuilderField())
+		require.Equal(t, tt.field, Field{Name: tt.name}.BuilderField())
+	}
+}
+
 func TestEdge(t *testing.T) {
 	u, g := &Type{Name: "User"}, &Type{Name: "Group"}
 	groups := &Edge{Name: "groups", Type: g, Owner: u, Rel: Relation{Type: M2M}}
@@ -240,102 +277,10 @@ func TestEdge(t *testing.T) {
 	require.True(t, users.IsInverse())
 	require.False(t, groups.IsInverse())
 
-	require.Equal(t, "GroupsLabel", users.Constant())
-	require.Equal(t, "GroupsLabel", groups.Constant())
+	require.Equal(t, "GroupsLabel", users.LabelConstant())
+	require.Equal(t, "GroupsLabel", groups.LabelConstant())
 
-	require.Equal(t, "UsersInverseLabel", users.InverseConstant())
+	require.Equal(t, "UsersInverseLabel", users.InverseLabelConstant())
 	require.Equal(t, "user_groups", users.Label())
 	require.Equal(t, "user_groups", groups.Label())
-}
-
-func TestType_Describe(t *testing.T) {
-	tests := []struct {
-		typ *Type
-		out string
-	}{
-		{
-			typ: &Type{
-				Name: "User",
-				ID:   &Field{Name: "id", Type: &field.TypeInfo{Type: field.TypeInt}},
-				Fields: []*Field{
-					{Name: "name", Type: &field.TypeInfo{Type: field.TypeString}, Validators: 1},
-					{Name: "age", Type: &field.TypeInfo{Type: field.TypeInt}, Nillable: true},
-					{Name: "created_at", Type: &field.TypeInfo{Type: field.TypeTime}, Nillable: true, Immutable: true},
-				},
-			},
-			out: `
-User:
-	+------------+-----------+--------+----------+----------+---------+---------------+-----------+-----------+------------+
-	|   Field    |   Type    | Unique | Optional | Nillable | Default | UpdateDefault | Immutable | StructTag | Validators |
-	+------------+-----------+--------+----------+----------+---------+---------------+-----------+-----------+------------+
-	| id         | int       | false  | false    | false    | false   | false         | false     |           |          0 |
-	| name       | string    | false  | false    | false    | false   | false         | false     |           |          1 |
-	| age        | int       | false  | false    | true     | false   | false         | false     |           |          0 |
-	| created_at | time.Time | false  | false    | true     | false   | false         | true      |           |          0 |
-	+------------+-----------+--------+----------+----------+---------+---------------+-----------+-----------+------------+
-	
-`,
-		},
-		{
-			typ: &Type{
-				Name: "User",
-				ID:   &Field{Name: "id", Type: &field.TypeInfo{Type: field.TypeInt}},
-				Edges: []*Edge{
-					{Name: "groups", Type: &Type{Name: "Group"}, Rel: Relation{Type: M2M}, Optional: true},
-					{Name: "spouse", Type: &Type{Name: "User"}, Unique: true, Rel: Relation{Type: O2O}},
-				},
-			},
-			out: `
-User:
-	+-------+------+--------+----------+----------+---------+---------------+-----------+-----------+------------+
-	| Field | Type | Unique | Optional | Nillable | Default | UpdateDefault | Immutable | StructTag | Validators |
-	+-------+------+--------+----------+----------+---------+---------------+-----------+-----------+------------+
-	| id    | int  | false  | false    | false    | false   | false         | false     |           |          0 |
-	+-------+------+--------+----------+----------+---------+---------------+-----------+-----------+------------+
-	+--------+-------+---------+---------+----------+--------+----------+
-	|  Edge  | Type  | Inverse | BackRef | Relation | Unique | Optional |
-	+--------+-------+---------+---------+----------+--------+----------+
-	| groups | Group | false   |         | M2M      | false  | true     |
-	| spouse | User  | false   |         | O2O      | true   | false    |
-	+--------+-------+---------+---------+----------+--------+----------+
-	
-`,
-		},
-		{
-			typ: &Type{
-				Name: "User",
-				ID:   &Field{Name: "id", Type: &field.TypeInfo{Type: field.TypeInt}},
-				Fields: []*Field{
-					{Name: "name", Type: &field.TypeInfo{Type: field.TypeString}, Validators: 1},
-					{Name: "age", Type: &field.TypeInfo{Type: field.TypeInt}, Nillable: true},
-				},
-				Edges: []*Edge{
-					{Name: "groups", Type: &Type{Name: "Group"}, Rel: Relation{Type: M2M}, Optional: true},
-					{Name: "spouse", Type: &Type{Name: "User"}, Unique: true, Rel: Relation{Type: O2O}},
-				},
-			},
-			out: `
-User:
-	+-------+--------+--------+----------+----------+---------+---------------+-----------+-----------+------------+
-	| Field |  Type  | Unique | Optional | Nillable | Default | UpdateDefault | Immutable | StructTag | Validators |
-	+-------+--------+--------+----------+----------+---------+---------------+-----------+-----------+------------+
-	| id    | int    | false  | false    | false    | false   | false         | false     |           |          0 |
-	| name  | string | false  | false    | false    | false   | false         | false     |           |          1 |
-	| age   | int    | false  | false    | true     | false   | false         | false     |           |          0 |
-	+-------+--------+--------+----------+----------+---------+---------------+-----------+-----------+------------+
-	+--------+-------+---------+---------+----------+--------+----------+
-	|  Edge  | Type  | Inverse | BackRef | Relation | Unique | Optional |
-	+--------+-------+---------+---------+----------+--------+----------+
-	| groups | Group | false   |         | M2M      | false  | true     |
-	| spouse | User  | false   |         | O2O      | true   | false    |
-	+--------+-------+---------+---------+----------+--------+----------+
-	
-`,
-		},
-	}
-	for _, tt := range tests {
-		b := &strings.Builder{}
-		tt.typ.Describe(b)
-		assert.Equal(t, tt.out, "\n"+b.String())
-	}
 }

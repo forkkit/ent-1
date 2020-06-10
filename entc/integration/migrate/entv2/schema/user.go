@@ -6,6 +6,7 @@ package schema
 
 import (
 	"github.com/facebookincubator/ent"
+	"github.com/facebookincubator/ent/schema/edge"
 	"github.com/facebookincubator/ent/schema/field"
 	"github.com/facebookincubator/ent/schema/index"
 )
@@ -18,14 +19,19 @@ type User struct {
 // Fields of the User.
 func (User) Fields() []ent.Field {
 	return []ent.Field{
+		field.Int("id").
+			StorageKey("oid"),
 		// changing the type of the field.
 		field.Int("age"),
 		// extending name field to longtext.
 		field.Text("name"),
-		// adding new columns.
-		field.String("phone"),
+		// changing nickname from unique no non-unique.
+		field.String("nickname"),
+		// adding new columns (must be either optional, or with a default value).
+		field.String("phone").
+			Default("unknown"),
 		field.Bytes("buffer").
-			Default([]byte("{}")),
+			Optional(),
 		// adding new column with supported default value
 		// in the database side, will append this value to
 		// all existing rows.
@@ -48,11 +54,35 @@ func (User) Fields() []ent.Field {
 	}
 }
 
+func (User) Edges() []ent.Edge {
+	return []ent.Edge{
+		// Edge(children<-M2O->parent) to be dropped.
+		// Edge(spouse<-O2O->spouse) to be dropped.
+		edge.To("car", Car.Type),
+		// A new edge was added.
+		edge.To("pets", Pet.Type).
+			Unique(),
+	}
+}
+
 func (User) Indexes() []ent.Index {
 	return []ent.Index{
 		// deleting old indexes (name, address),
 		// and defining a new one.
 		index.Fields("phone", "age").
+			Unique(),
+	}
+}
+
+type Car struct {
+	ent.Schema
+}
+
+func (Car) Edges() []ent.Edge {
+	return []ent.Edge{
+		// Car now can have more than 1 owner (not unique anymore).
+		edge.From("owner", User.Type).
+			Ref("car").
 			Unique(),
 	}
 }

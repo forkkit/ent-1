@@ -11,35 +11,57 @@ in the LICENSE file in the root directory of this source tree.
 
 {{ template "import" $ }}
 
+import (
+	"{{ $.Config.Package }}/{{ $.Package }}"
+)
+
+
 {{ $builder := print (pascal $.Name) "Delete" }}
 {{ $receiver := receiver $builder }}
+{{ $mutation := print $receiver ".mutation" }}
+
 // {{ $builder }} is the builder for deleting a {{ pascal $.Name }} entity.
 type {{ $builder }} struct {
 	config
+	hooks      []Hook
+	mutation   *{{ $.MutationName }}
 	predicates []predicate.{{ $.Name }}
 }
 
 
 // Where adds a new predicate to the delete builder.
-func ({{ $receiver}} *{{ $builder }}) Where(ps ...predicate.{{ $.Name }}) *{{ $builder }} {
+func ({{ $receiver }} *{{ $builder }}) Where(ps ...predicate.{{ $.Name }}) *{{ $builder }} {
 	{{ $receiver}}.predicates = append({{ $receiver}}.predicates, ps...)
 	return {{ $receiver }}
 }
 
 // Exec executes the deletion query and returns how many vertices were deleted.
 func ({{ $receiver}} *{{ $builder }}) Exec(ctx context.Context) (int, error) {
-	{{- if gt (len $.Storage) 1 -}}
-		switch {{ $receiver }}.driver.Dialect() {
-		{{- range $_, $storage := $.Storage }}
-		case {{ join $storage.Dialects ", " }}:
-			return {{ $receiver }}.{{ $storage }}Exec(ctx)
-		{{- end }}
-		default:
-			return 0, errors.New("{{ $pkg }}: unsupported dialect")
+	var (
+		err error
+		affected int
+	)
+	if len({{ $receiver }}.hooks) == 0 {
+		affected, err = {{ $receiver }}.{{ $.Storage }}Exec(ctx)
+	} else {
+		var mut Mutator = MutateFunc(func(ctx context.Context, m Mutation) (Value, error) {
+			mutation, ok := m.(*{{ $.MutationName }})
+			if !ok {
+				return nil, fmt.Errorf("unexpected mutation type %T", m)
+			}
+			{{ $mutation }} = mutation
+			affected, err = {{ $receiver }}.{{ $.Storage }}Exec(ctx)
+			mutation.done = true
+			return affected, err
+		})
+		for i := len({{ $receiver }}.hooks) - 1; i >= 0; i-- {
+			mut = {{ $receiver }}.hooks[i](mut)
 		}
-	{{- else -}}
-		return {{ $receiver }}.{{ index $.Storage 0 }}Exec(ctx)
-	{{- end }}
+		if _, err := mut.Mutate(ctx, {{ $mutation }}); err != nil {
+			return 0, err
+		}
+	}
+	return affected, err
 }
 
 // ExecX is like Exec, but panics if an error occurs.
@@ -51,11 +73,9 @@ func ({{ $receiver }} *{{ $builder }}) ExecX(ctx context.Context) int {
 	return n
 }
 
-{{- range $_, $storage := $.Storage }}
-	{{ with extend $ "Builder" $builder }}
-		{{ $tmpl := printf "dialect/%s/delete" $storage }}
-		{{ xtemplate $tmpl . }}
-	{{ end }}
+{{ with extend $ "Builder" $builder }}
+	{{ $tmpl := printf "dialect/%s/delete" $.Storage }}
+	{{ xtemplate $tmpl . }}
 {{ end }}
 
 {{ $onebuilder := print $builder "One" }}
@@ -73,7 +93,7 @@ func ({{ $oneReceiver }} *{{ $onebuilder }}) Exec(ctx context.Context) error {
 	case err != nil:
 		return err
 	case n == 0:
-		return &ErrNotFound{ {{ $.Package }}.Label}
+		return &NotFoundError{ {{ $.Package }}.Label}
 	default:
 		return nil
 	}

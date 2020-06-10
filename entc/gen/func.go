@@ -26,8 +26,10 @@ var (
 	Funcs = template.FuncMap{
 		"ops":         ops,
 		"add":         add,
-		"append":      reflect.AppendSlice,
+		"append":      reflect.Append,
+		"appends":     reflect.AppendSlice,
 		"order":       order,
+		"camel":       camel,
 		"snake":       snake,
 		"pascal":      pascal,
 		"extend":      extend,
@@ -44,19 +46,31 @@ var (
 		"lower":       strings.ToLower,
 		"upper":       strings.ToUpper,
 		"hasField":    hasField,
+		"hasImport":   hasImport,
 		"indirect":    indirect,
+		"hasPrefix":   strings.HasPrefix,
 		"hasSuffix":   strings.HasSuffix,
 		"trimPackage": trimPackage,
 		"xtemplate":   xtemplate,
 		"hasTemplate": hasTemplate,
+		"split":       strings.Split,
+		"tagLookup":   tagLookup,
+		"toString":    toString,
+		"dict":        dict,
+		"get":         get,
+		"set":         set,
+		"unset":       unset,
+		"hasKey":      hasKey,
+		"list":        list,
 	}
-	rules   = ruleset()
-	acronym = make(map[string]bool)
+	rules    = ruleset()
+	acronyms = make(map[string]bool)
 )
 
 // ops returns all operations for given field.
 func ops(f *Field) (op []Op) {
 	switch t := f.Type.Type; {
+	case f.HasGoType() && !f.ConvertedToBasic():
 	case t == field.TypeJSON:
 	case t == field.TypeBool:
 		op = boolOps
@@ -94,19 +108,33 @@ func plural(name string) string {
 //
 //	user_info => UserInfo
 //	full_name => FullName
-//  user_id   => UserID
+//	user_id   => UserID
 //
 func pascal(s string) string {
 	words := strings.Split(s, "_")
 	for i, w := range words {
 		upper := strings.ToUpper(w)
-		if acronym[upper] {
+		if acronyms[upper] {
 			words[i] = upper
 		} else {
 			words[i] = rules.Capitalize(w)
 		}
 	}
 	return strings.Join(words, "")
+}
+
+// camel converts the given column name into a camelCase.
+//
+//	user_info => userInfo
+//	full_name => fullName
+//	user_id   => userID
+//
+func camel(s string) string {
+	words := strings.SplitN(s, "_", 2)
+	if len(words) == 1 {
+		return strings.ToLower(words[0])
+	}
+	return strings.ToLower(words[0]) + pascal(words[1])
 }
 
 // snake converts the given struct or field name into a snake_case.
@@ -116,16 +144,21 @@ func pascal(s string) string {
 //	HTTPCode => http_code
 //
 func snake(s string) string {
-	var b strings.Builder
+	var (
+		j int
+		b strings.Builder
+	)
 	for i := 0; i < len(s); i++ {
 		r := rune(s[i])
-		// put '_' if it is not a start or end of a word, current letter is an uppercase letter,
-		// and previous letter is a lowercase letter (cases like: "UserInfo"), or next letter is
-		// also a lowercase letter and previous letter is not "_".
-		if i > 0 && i < len(s)-1 && unicode.IsUpper(r) &&
-			(unicode.IsLower(rune(s[i-1])) ||
-				unicode.IsLower(rune(s[i+1])) && unicode.IsLetter(rune(s[i-1]))) {
-			b.WriteString("_")
+		// Put '_' if it is not a start or end of a word, current letter is uppercase,
+		// and previous is lowercase (cases like: "UserInfo"), or next letter is also
+		// a lowercase and previous letter is not "_".
+		if i > 0 && i < len(s)-1 && unicode.IsUpper(r) {
+			if unicode.IsLower(rune(s[i-1])) ||
+				j != i-1 && unicode.IsLower(rune(s[i+1])) && unicode.IsLetter(rune(s[i-1])) {
+				j = i
+				b.WriteString("_")
+			}
 		}
 		b.WriteRune(unicode.ToLower(r))
 	}
@@ -135,12 +168,13 @@ func snake(s string) string {
 // receiver returns the receiver name of the given type.
 //
 //	[]T       => t
+//	[1]T      => t
 //	User      => u
 //	UserQuery => uq
 //
 func receiver(s string) (r string) {
-	// trim optional operators.
-	s = strings.Trim(s, "[]*&")
+	// Trim invalid tokens for identifier prefix.
+	s = strings.Trim(s, "[]*&0123456789")
 	parts := strings.Split(snake(s), "_")
 	min := len(parts[0])
 	for _, w := range parts[1:] {
@@ -191,6 +225,16 @@ func extend(v interface{}, kv ...interface{}) (interface{}, error) {
 		return &typeScope{Type: v, Scope: scope}, nil
 	case *Graph:
 		return &graphScope{Graph: v, Scope: scope}, nil
+	case *typeScope:
+		for k := range v.Scope {
+			scope[k] = v.Scope[k]
+		}
+		return &typeScope{Type: v.Type, Scope: scope}, nil
+	case *graphScope:
+		for k := range v.Scope {
+			scope[k] = v.Scope[k]
+		}
+		return &graphScope{Graph: v.Graph, Scope: scope}, nil
 	default:
 		return nil, fmt.Errorf("invalid type for extend: %T", v)
 	}
@@ -206,14 +250,15 @@ func add(xs ...int) (n int) {
 
 func ruleset() *inflect.Ruleset {
 	rules := inflect.NewDefaultRuleset()
-	// add common initialisms. copied from golint.
+	// Add common initialisms from golint and more.
 	for _, w := range []string{
-		"API", "ASCII", "CPU", "CSS", "DNS", "GUID", "UID", "UI",
-		"RHS", "RPC", "SLA", "SMTP", "SSH", "TLS", "TTL", "HTML",
-		"HTTP", "HTTPS", "ID", "IP", "JSON", "LHS", "QPS", "RAM",
-		"UUID", "URI", "URL", "UTF8", "VM", "XML", "XSRF", "XSS",
+		"ACL", "API", "ASCII", "AWS", "CPU", "CSS", "DNS", "EOF", "GB", "GUID",
+		"HTML", "HTTP", "HTTPS", "ID", "IP", "JSON", "KB", "LHS", "MAC", "MB",
+		"QPS", "RAM", "RHS", "RPC", "SLA", "SMTP", "SQL", "SSH", "SSO", "TCP",
+		"TLS", "TTL", "UDP", "UI", "UID", "URI", "URL", "UTF8", "UUID", "VM",
+		"XML", "XMPP", "XSRF", "XSS",
 	} {
-		acronym[w] = true
+		acronyms[w] = true
 		rules.AddAcronym(w)
 	}
 	return rules
@@ -287,6 +332,12 @@ func hasField(v interface{}, name string) bool {
 	return vr.FieldByName(name).IsValid()
 }
 
+// hasImport reports if the package name exists in the predefined import packages.
+func hasImport(name string) bool {
+	_, ok := importPkg[name]
+	return ok
+}
+
 // trimPackage trims the package name from the given identifier.
 func trimPackage(ident, pkg string) string {
 	return strings.TrimPrefix(ident, pkg+".")
@@ -296,5 +347,73 @@ func trimPackage(ident, pkg string) string {
 func indirect(v reflect.Value) reflect.Value {
 	for ; v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface; v = v.Elem() {
 	}
+	return v
+}
+
+// tagLookup returns the value associated with key in the tag string.
+func tagLookup(tag, key string) string {
+	v, _ := reflect.StructTag(tag).Lookup(key)
+	return v
+}
+
+// toString converts `v` to a string.
+func toString(v interface{}) string {
+	switch v := v.(type) {
+	case string:
+		return v
+	case []byte:
+		return string(v)
+	case error:
+		return v.Error()
+	case fmt.Stringer:
+		return v.String()
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+// dict creates a dictionary from a list of pairs.
+func dict(v ...interface{}) map[string]interface{} {
+	lenv := len(v)
+	dict := make(map[string]interface{}, lenv/2)
+	for i := 0; i < lenv; i += 2 {
+		key := toString(v[i])
+		if i+1 >= lenv {
+			dict[key] = ""
+			continue
+		}
+		dict[key] = v[i+1]
+	}
+	return dict
+}
+
+// get the value from the dict for key.
+func get(d map[string]interface{}, key string) interface{} {
+	if val, ok := d[key]; ok {
+		return val
+	}
+	return ""
+}
+
+// set adds a value to the dict for key.
+func set(d map[string]interface{}, key string, value interface{}) map[string]interface{} {
+	d[key] = value
+	return d
+}
+
+// unset removes a key from the dict.
+func unset(d map[string]interface{}, key string) map[string]interface{} {
+	delete(d, key)
+	return d
+}
+
+// hasKey tests whether a key is found in dict.
+func hasKey(d map[string]interface{}, key string) bool {
+	_, ok := d[key]
+	return ok
+}
+
+// list creates a list from values.
+func list(v ...interface{}) []interface{} {
 	return v
 }

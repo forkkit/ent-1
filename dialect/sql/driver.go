@@ -7,10 +7,8 @@ package sql
 import (
 	"context"
 	"database/sql"
-	"database/sql/driver"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/facebookincubator/ent/dialect"
 )
@@ -42,8 +40,8 @@ func (d Driver) DB() *sql.DB {
 
 // Dialect implements the dialect.Dialect method.
 func (d Driver) Dialect() string {
-	// if the underlying driver is wrapped with opencensus driver.
-	for _, name := range []string{dialect.MySQL, dialect.SQLite} {
+	// If the underlying driver is wrapped with opencensus driver.
+	for _, name := range []string{dialect.MySQL, dialect.SQLite, dialect.Postgres} {
 		if strings.HasPrefix(d.dialect, name) {
 			return name
 		}
@@ -53,7 +51,12 @@ func (d Driver) Dialect() string {
 
 // Tx starts and returns a transaction.
 func (d *Driver) Tx(ctx context.Context) (dialect.Tx, error) {
-	tx, err := d.ExecQuerier.(*sql.DB).BeginTx(ctx, &sql.TxOptions{})
+	return d.BeginTx(ctx, &sql.TxOptions{})
+}
+
+// BeginTx starts a transaction with options.
+func (d *Driver) BeginTx(ctx context.Context, opts *TxOptions) (dialect.Tx, error) {
+	tx, err := d.ExecQuerier.(*sql.DB).BeginTx(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -87,19 +90,24 @@ type conn struct {
 
 // Exec implements the dialect.Exec method.
 func (c *conn) Exec(ctx context.Context, query string, args, v interface{}) error {
-	vr, ok := v.(*sql.Result)
-	if !ok {
-		return fmt.Errorf("dialect/sql: invalid type %T. expect *sql.Result", v)
-	}
 	argv, ok := args.([]interface{})
 	if !ok {
 		return fmt.Errorf("dialect/sql: invalid type %T. expect []interface{} for args", v)
 	}
-	res, err := c.ExecContext(ctx, query, argv...)
-	if err != nil {
-		return err
+	switch v := v.(type) {
+	case nil:
+		if _, err := c.ExecContext(ctx, query, argv...); err != nil {
+			return err
+		}
+	case *sql.Result:
+		res, err := c.ExecContext(ctx, query, argv...)
+		if err != nil {
+			return err
+		}
+		*v = res
+	default:
+		return fmt.Errorf("dialect/sql: invalid type %T. expect *sql.Result", v)
 	}
-	*vr = res
 	return nil
 }
 
@@ -136,33 +144,8 @@ type (
 	NullString = sql.NullString
 	// NullFloat64 is an alias to sql.NullFloat64.
 	NullFloat64 = sql.NullFloat64
+	// NullTime represents a time.Time that may be null.
+	NullTime = sql.NullTime
+	// TxOptions holds the transaction options to be used in DB.BeginTx.
+	TxOptions = sql.TxOptions
 )
-
-// Note:
-// NullTime is a modified copy of database/sql.NullTime from Go 1.13,
-// It should be replaced with standard library code when Go 1.13 is released.
-
-// NullTime represents a time.Time that may be null.
-// NullTime implements the Scanner interface so
-// it can be used as a scan destination, similar to NullString.
-type NullTime struct {
-	Time  time.Time
-	Valid bool // Valid is true if Time is not NULL
-}
-
-// Scan implements the Scanner interface.
-func (n *NullTime) Scan(v interface{}) error {
-	if v, ok := v.(time.Time); ok {
-		n.Time = v
-		n.Valid = true
-	}
-	return nil
-}
-
-// Value implements the driver Valuer interface.
-func (n NullTime) Value() (driver.Value, error) {
-	if !n.Valid {
-		return nil, nil
-	}
-	return n.Time, nil
-}

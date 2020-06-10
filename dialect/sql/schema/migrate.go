@@ -39,7 +39,7 @@ func WithGlobalUniqueID(b bool) MigrateOption {
 // Defaults to false.
 func WithDropColumn(b bool) MigrateOption {
 	return func(m *Migrate) {
-		m.dropColumn = b
+		m.dropColumns = b
 	}
 }
 
@@ -47,7 +47,15 @@ func WithDropColumn(b bool) MigrateOption {
 // Defaults to false.
 func WithDropIndex(b bool) MigrateOption {
 	return func(m *Migrate) {
-		m.dropIndex = b
+		m.dropIndexes = b
+	}
+}
+
+// WithFixture sets the foreign-key renaming option to the migration when upgrading
+// ent from v0.1.0 (issue-#285). Defaults to true.
+func WithFixture(b bool) MigrateOption {
+	return func(m *Migrate) {
+		m.withFixture = b
 	}
 }
 
@@ -55,19 +63,22 @@ func WithDropIndex(b bool) MigrateOption {
 type Migrate struct {
 	sqlDialect
 	universalID bool     // global unique ids.
-	dropColumn  bool     // drop deleted columns.
-	dropIndex   bool     // drop deleted indexes.
+	dropColumns bool     // drop deleted columns.
+	dropIndexes bool     // drop deleted indexes.
+	withFixture bool     // with fks rename fixture.
 	typeRanges  []string // types order by their range.
 }
 
 // NewMigrate create a migration structure for the given SQL driver.
 func NewMigrate(d dialect.Driver, opts ...MigrateOption) (*Migrate, error) {
-	m := &Migrate{}
+	m := &Migrate{withFixture: true}
 	switch d.Dialect() {
 	case dialect.MySQL:
 		m.sqlDialect = &MySQL{Driver: d}
 	case dialect.SQLite:
 		m.sqlDialect = &SQLite{Driver: d}
+	case dialect.Postgres:
+		m.sqlDialect = &Postgres{Driver: d}
 	default:
 		return nil, fmt.Errorf("sql/schema: unsupported dialect %q", d.Dialect())
 	}
@@ -107,13 +118,19 @@ func (m *Migrate) Create(ctx context.Context, tables ...*Table) error {
 
 func (m *Migrate) create(ctx context.Context, tx dialect.Tx, tables ...*Table) error {
 	for _, t := range tables {
-		t.setup()
+		m.setupTable(t)
 		switch exist, err := m.tableExist(ctx, tx, t.Name); {
 		case err != nil:
 			return err
 		case exist:
 			curr, err := m.table(ctx, tx, t.Name)
 			if err != nil {
+				return err
+			}
+			if err := m.verify(ctx, tx, curr); err != nil {
+				return err
+			}
+			if err := m.fixture(ctx, tx, curr, t); err != nil {
 				return err
 			}
 			change, err := m.changeSet(curr, t)
@@ -125,11 +142,11 @@ func (m *Migrate) create(ctx context.Context, tx dialect.Tx, tables ...*Table) e
 			}
 		default: // !exist
 			query, args := m.tBuilder(t).Query()
-			if err := tx.Exec(ctx, query, args, new(sql.Result)); err != nil {
+			if err := tx.Exec(ctx, query, args, nil); err != nil {
 				return fmt.Errorf("create table %q: %v", t.Name, err)
 			}
-			// if global unique identifier is enabled and it's not a relation table,
-			// allocate a range for the table pk.
+			// If global unique identifier is enabled and it's not
+			// a relation table, allocate a range for the table pk.
 			if m.universalID && len(t.PrimaryKey) == 1 {
 				if err := m.allocPKRange(ctx, tx, t); err != nil {
 					return err
@@ -137,14 +154,14 @@ func (m *Migrate) create(ctx context.Context, tx dialect.Tx, tables ...*Table) e
 			}
 			// indexes.
 			for _, idx := range t.Indexes {
-				query, args := idx.Builder(t.Name).Query()
-				if err := tx.Exec(ctx, query, args, new(sql.Result)); err != nil {
+				query, args := m.addIndex(idx, t.Name).Query()
+				if err := tx.Exec(ctx, query, args, nil); err != nil {
 					return fmt.Errorf("create index %q: %v", idx.Name, err)
 				}
 			}
 		}
 	}
-	// create foreign keys after tables were created/altered,
+	// Create foreign keys after tables were created/altered,
 	// because circular foreign-key constraints are possible.
 	for _, t := range tables {
 		if len(t.ForeignKeys) == 0 {
@@ -152,7 +169,6 @@ func (m *Migrate) create(ctx context.Context, tx dialect.Tx, tables ...*Table) e
 		}
 		fks := make([]*ForeignKey, 0, len(t.ForeignKeys))
 		for _, fk := range t.ForeignKeys {
-			fk.Symbol = symbol(fk.Symbol)
 			exist, err := m.fkExist(ctx, tx, fk.Symbol)
 			if err != nil {
 				return err
@@ -164,12 +180,12 @@ func (m *Migrate) create(ctx context.Context, tx dialect.Tx, tables ...*Table) e
 		if len(fks) == 0 {
 			continue
 		}
-		b := sql.AlterTable(t.Name)
+		b := sql.Dialect(m.Dialect()).AlterTable(t.Name)
 		for _, fk := range fks {
 			b.AddForeignKey(fk.DSL())
 		}
 		query, args := b.Query()
-		if err := tx.Exec(ctx, query, args, new(sql.Result)); err != nil {
+		if err := tx.Exec(ctx, query, args, nil); err != nil {
 			return fmt.Errorf("create foreign keys for %q: %v", t.Name, err)
 		}
 	}
@@ -178,39 +194,36 @@ func (m *Migrate) create(ctx context.Context, tx dialect.Tx, tables ...*Table) e
 
 // apply applies changes on the given table.
 func (m *Migrate) apply(ctx context.Context, tx dialect.Tx, table string, change *changes) error {
-	// constraints should be dropped before dropping columns, because if a column
+	// Constraints should be dropped before dropping columns, because if a column
 	// is a part of multi-column constraints (like, unique index), ALTER TABLE
 	// might fail if the intermediate state violates the constraints.
-	if m.dropIndex {
+	if m.dropIndexes {
+		if pr, ok := m.sqlDialect.(preparer); ok {
+			if err := pr.prepare(ctx, tx, change, table); err != nil {
+				return err
+			}
+		}
 		for _, idx := range change.index.drop {
-			query, args := idx.DropBuilder(table).Query()
-			if err := tx.Exec(ctx, query, args, new(sql.Result)); err != nil {
+			if err := m.dropIndex(ctx, tx, idx, table); err != nil {
 				return fmt.Errorf("drop index of table %q: %v", table, err)
 			}
 		}
 	}
-	b := sql.AlterTable(table)
-	for _, c := range change.column.add {
-		b.AddColumn(m.cBuilder(c))
+	var drop []*Column
+	if m.dropColumns {
+		drop = change.column.drop
 	}
-	for _, c := range change.column.modify {
-		b.ModifyColumn(m.cBuilder(c))
-	}
-	if m.dropColumn {
-		for _, c := range change.column.drop {
-			b.DropColumn(sql.Column(c.Name))
-		}
-	}
-	// if there's actual action to execute on ALTER TABLE.
-	if len(b.Queriers) != 0 {
-		query, args := b.Query()
-		if err := tx.Exec(ctx, query, args, new(sql.Result)); err != nil {
+	queries := m.alterColumns(table, change.column.add, change.column.modify, drop)
+	// If there's actual action to execute on ALTER TABLE.
+	for i := range queries {
+		query, args := queries[i].Query()
+		if err := tx.Exec(ctx, query, args, nil); err != nil {
 			return fmt.Errorf("alter table %q: %v", table, err)
 		}
 	}
 	for _, idx := range change.index.add {
-		query, args := idx.Builder(table).Query()
-		if err := tx.Exec(ctx, query, args, new(sql.Result)); err != nil {
+		query, args := m.addIndex(idx, table).Query()
+		if err := tx.Exec(ctx, query, args, nil); err != nil {
 			return fmt.Errorf("create index %q: %v", table, err)
 		}
 	}
@@ -232,6 +245,16 @@ type changes struct {
 	}
 }
 
+// dropColumn returns the dropped column by name (if any).
+func (c *changes) dropColumn(name string) (*Column, bool) {
+	for _, col := range c.column.drop {
+		if col.Name == name {
+			return col, true
+		}
+	}
+	return nil, false
+}
+
 // changeSet returns a changes object to be applied on existing table.
 // It fails if one of the changes is invalid.
 func (m *Migrate) changeSet(curr, new *Table) (*changes, error) {
@@ -247,16 +270,18 @@ func (m *Migrate) changeSet(curr, new *Table) (*changes, error) {
 			return nil, fmt.Errorf("cannot change primary key for table: %q", curr.Name)
 		}
 	}
-	// add or modify columns.
+	// Add or modify columns.
 	for _, c1 := range new.Columns {
-		// ignore primary keys.
+		// Ignore primary keys.
 		if c1.PrimaryKey() {
 			continue
 		}
 		switch c2, ok := curr.column(c1.Name); {
 		case !ok:
 			change.column.add = append(change.column.add, c1)
-		// modify a non-unique column to unique.
+		case !c2.Type.Valid():
+			return nil, fmt.Errorf("invalid type %q for column %q", c2.typ, c2.Name)
+		// Modify a non-unique column to unique.
 		case c1.Unique && !c2.Unique:
 			change.index.add.append(&Index{
 				Name:    c1.Name,
@@ -264,28 +289,28 @@ func (m *Migrate) changeSet(curr, new *Table) (*changes, error) {
 				Columns: []*Column{c1},
 				columns: []string{c1.Name},
 			})
-		// modify a unique column to non-unique.
+		// Modify a unique column to non-unique.
 		case !c1.Unique && c2.Unique:
 			idx, ok := curr.index(c2.Name)
 			if !ok {
 				return nil, fmt.Errorf("missing index to drop for column %q", c2.Name)
 			}
 			change.index.drop.append(idx)
-		// extending column types.
+		// Extending column types.
 		case m.cType(c1) != m.cType(c2):
 			if !c2.ConvertibleTo(c1) {
 				return nil, fmt.Errorf("changing column type for %q is invalid (%s != %s)", c1.Name, m.cType(c1), m.cType(c2))
 			}
 			fallthrough
-		// change nullability of a column.
+		// Change nullability of a column.
 		case c1.Nullable != c2.Nullable:
 			change.column.modify = append(change.column.modify, c1)
 		}
 	}
 
-	// drop columns.
+	// Drop columns.
 	for _, c1 := range curr.Columns {
-		// if a column was dropped, multi-columns indexes that are associated with this column will
+		// If a column was dropped, multi-columns indexes that are associated with this column will
 		// no longer behave the same. Therefore, these indexes should be dropped too. There's no need
 		// to do it explicitly (here), because entc will remove them from the schema specification,
 		// and they will be dropped in the block below.
@@ -294,25 +319,115 @@ func (m *Migrate) changeSet(curr, new *Table) (*changes, error) {
 		}
 	}
 
-	// add or modify indexes.
+	// Add or modify indexes.
 	for _, idx1 := range new.Indexes {
 		switch idx2, ok := curr.index(idx1.Name); {
 		case !ok:
 			change.index.add.append(idx1)
-		// changing index cardinality require drop and create.
+		// Changing index cardinality require drop and create.
 		case idx1.Unique != idx2.Unique:
 			change.index.drop.append(idx2)
 			change.index.add.append(idx1)
 		}
 	}
 
-	// drop indexes.
-	for _, idx1 := range curr.Indexes {
-		if _, ok := new.index(idx1.Name); !ok {
-			change.index.drop.append(idx1)
+	// Drop indexes.
+	for _, idx := range curr.Indexes {
+		_, ok1 := new.fk(idx.Name)
+		_, ok2 := new.index(idx.Name)
+		if !ok1 && !ok2 {
+			change.index.drop.append(idx)
 		}
 	}
 	return change, nil
+}
+
+// fixture is a special migration code for renaming foreign-key columns (issue-#285).
+func (m *Migrate) fixture(ctx context.Context, tx dialect.Tx, curr, new *Table) error {
+	d, ok := m.sqlDialect.(fkRenamer)
+	if !m.withFixture || !ok {
+		return nil
+	}
+	rename := make(map[string]*Index)
+	for _, fk := range new.ForeignKeys {
+		ok, err := m.fkExist(ctx, tx, fk.Symbol)
+		if err != nil {
+			return fmt.Errorf("checking foreign-key existence %q: %v", fk.Symbol, err)
+		}
+		if !ok {
+			continue
+		}
+		column, err := m.fkColumn(ctx, tx, fk)
+		if err != nil {
+			return err
+		}
+		newcol := fk.Columns[0]
+		if column == newcol.Name {
+			continue
+		}
+		query, args := d.renameColumn(curr, &Column{Name: column}, newcol).Query()
+		if err := tx.Exec(ctx, query, args, nil); err != nil {
+			return fmt.Errorf("rename column %q: %v", column, err)
+		}
+		prev, ok := curr.column(column)
+		if !ok {
+			continue
+		}
+		// Find all indexes that ~maybe need to be renamed.
+		for _, idx := range prev.indexes {
+			switch _, ok := new.index(idx.Name); {
+			// Ignore indexes that exist in the schema, PKs.
+			case ok || idx.primary:
+			// Index that was created implicitly for a unique
+			// column needs to be renamed to the column name.
+			case d.isImplicitIndex(idx, prev):
+				idx2 := &Index{Name: newcol.Name, Unique: true, Columns: []*Column{newcol}}
+				query, args := d.renameIndex(curr, idx, idx2).Query()
+				if err := tx.Exec(ctx, query, args, nil); err != nil {
+					return fmt.Errorf("rename index %q: %v", prev.Name, err)
+				}
+				idx.Name = idx2.Name
+			default:
+				rename[idx.Name] = idx
+			}
+		}
+		// Update the name of the loaded column, so `changeSet` won't create it.
+		prev.Name = newcol.Name
+	}
+	// Go over the indexes that need to be renamed
+	// and find their ~identical in the new schema.
+	for _, idx := range rename {
+	Find:
+		// Find its ~identical in the new schema, and rename it
+		// if it doesn't exist.
+		for _, idx2 := range new.Indexes {
+			if _, ok := curr.index(idx2.Name); ok {
+				continue
+			}
+			if idx.sameAs(idx2) {
+				query, args := d.renameIndex(curr, idx, idx2).Query()
+				if err := tx.Exec(ctx, query, args, nil); err != nil {
+					return fmt.Errorf("rename index %q: %v", idx.Name, err)
+				}
+				idx.Name = idx2.Name
+				break Find
+			}
+		}
+	}
+	return nil
+}
+
+// verify verifies that the auto-increment counter is correct for table with universal-id support.
+func (m *Migrate) verify(ctx context.Context, tx dialect.Tx, t *Table) error {
+	vr, ok := m.sqlDialect.(verifyRanger)
+	if !ok || !m.universalID {
+		return nil
+	}
+	id := indexOf(m.typeRanges, t.Name)
+	if id == -1 {
+		return nil
+	}
+	return vr.verifyRange(ctx, tx, t, id<<32)
 }
 
 // types loads the type list from the database.
@@ -327,13 +442,14 @@ func (m *Migrate) types(ctx context.Context, tx dialect.Tx) error {
 			AddPrimary(&Column{Name: "id", Type: field.TypeInt, Increment: true}).
 			AddColumn(&Column{Name: "type", Type: field.TypeString, Unique: true})
 		query, args := m.tBuilder(t).Query()
-		if err := tx.Exec(ctx, query, args, new(sql.Result)); err != nil {
+		if err := tx.Exec(ctx, query, args, nil); err != nil {
 			return fmt.Errorf("create types table: %v", err)
 		}
 		return nil
 	}
 	rows := &sql.Rows{}
-	query, args := sql.Select("type").From(sql.Table(TypeTable)).OrderBy(sql.Asc("id")).Query()
+	query, args := sql.Dialect(m.Dialect()).
+		Select("type").From(sql.Table(TypeTable)).OrderBy(sql.Asc("id")).Query()
 	if err := tx.Query(ctx, query, args, rows); err != nil {
 		return fmt.Errorf("query types table: %v", err)
 	}
@@ -342,36 +458,91 @@ func (m *Migrate) types(ctx context.Context, tx dialect.Tx) error {
 }
 
 func (m *Migrate) allocPKRange(ctx context.Context, tx dialect.Tx, t *Table) error {
-	id := -1
-	// if the table re-created, re-use its range from the past.
-	for i, name := range m.typeRanges {
-		if name == t.Name {
-			id = i
-			break
-		}
-	}
-	// allocate a new id-range.
+	id := indexOf(m.typeRanges, t.Name)
+	// If the table re-created, re-use its range from
+	// the past. otherwise, allocate a new id-range.
 	if id == -1 {
 		if len(m.typeRanges) > MaxTypes {
 			return fmt.Errorf("max number of types exceeded: %d", MaxTypes)
 		}
-		query, args := sql.Insert(TypeTable).Columns("type").Values(t.Name).Query()
-		if err := tx.Exec(ctx, query, args, new(sql.Result)); err != nil {
+		query, args := sql.Dialect(m.Dialect()).
+			Insert(TypeTable).Columns("type").Values(t.Name).Query()
+		if err := tx.Exec(ctx, query, args, nil); err != nil {
 			return fmt.Errorf("insert into type: %v", err)
 		}
 		id = len(m.typeRanges)
 		m.typeRanges = append(m.typeRanges, t.Name)
 	}
-	// set the id offset for table.
-	return m.setRange(ctx, tx, t.Name, id<<32)
+	// Set the id offset for table.
+	return m.setRange(ctx, tx, t, id<<32)
 }
 
-// symbol makes sure the symbol length is not longer than the maxlength in MySQL standard (64).
-func symbol(name string) string {
-	if len(name) <= 64 {
+// fkColumn returns the column name of a foreign-key.
+func (m *Migrate) fkColumn(ctx context.Context, tx dialect.Tx, fk *ForeignKey) (string, error) {
+	t1 := sql.Table("INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS t1").Unquote().As("t1")
+	t2 := sql.Table("INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS t2").Unquote().As("t2")
+	query, args := sql.Dialect(m.Dialect()).
+		Select("column_name").
+		From(t1).
+		Join(t2).
+		On(t1.C("constraint_name"), t2.C("constraint_name")).
+		Where(sql.And(
+			sql.EQ(t2.C("constraint_type"), sql.Raw("'FOREIGN KEY'")),
+			sql.EQ(t2.C("table_schema"), m.sqlDialect.(fkRenamer).tableSchema()),
+			sql.EQ(t1.C("table_schema"), m.sqlDialect.(fkRenamer).tableSchema()),
+			sql.EQ(t2.C("constraint_name"), fk.Symbol),
+		)).
+		Query()
+	rows := &sql.Rows{}
+	if err := tx.Query(ctx, query, args, rows); err != nil {
+		return "", fmt.Errorf("reading foreign-key %q column: %v", fk.Symbol, err)
+	}
+	defer rows.Close()
+	column, err := sql.ScanString(rows)
+	if err != nil {
+		return "", fmt.Errorf("scanning foreign-key %q column: %v", fk.Symbol, err)
+	}
+	return column, nil
+}
+
+// setup ensures the table is configured properly, like table columns
+// are linked to their indexes, and PKs columns are defined.
+func (m *Migrate) setupTable(t *Table) {
+	if t.columns == nil {
+		t.columns = make(map[string]*Column, len(t.Columns))
+	}
+	for _, c := range t.Columns {
+		t.columns[c.Name] = c
+	}
+	for _, idx := range t.Indexes {
+		idx.Name = m.symbol(idx.Name)
+		for _, c := range idx.Columns {
+			c.indexes.append(idx)
+		}
+	}
+	for _, pk := range t.PrimaryKey {
+		c := t.columns[pk.Name]
+		c.Key = PrimaryKey
+		pk.Key = PrimaryKey
+	}
+	for _, fk := range t.ForeignKeys {
+		fk.Symbol = m.symbol(fk.Symbol)
+		for i := range fk.Columns {
+			fk.Columns[i].foreign = fk
+		}
+	}
+}
+
+// symbol makes sure the symbol length is not longer than the maxlength in the dialect.
+func (m *Migrate) symbol(name string) string {
+	size := 64
+	if m.Dialect() == dialect.Postgres {
+		size = 63
+	}
+	if len(name) <= size {
 		return name
 	}
-	return fmt.Sprintf("%s_%x", name[:31], md5.Sum([]byte(name)))
+	return fmt.Sprintf("%s_%x", name[:size-33], md5.Sum([]byte(name)))
 }
 
 // rollback calls to tx.Rollback and wraps the given error with the rollback error if occurred.
@@ -390,14 +561,20 @@ func exist(ctx context.Context, tx dialect.Tx, query string, args ...interface{}
 		return false, fmt.Errorf("reading schema information %v", err)
 	}
 	defer rows.Close()
-	if !rows.Next() {
-		return false, fmt.Errorf("no rows returned")
-	}
-	var n int
-	if err := rows.Scan(&n); err != nil {
-		return false, fmt.Errorf("scanning count")
+	n, err := sql.ScanInt(rows)
+	if err != nil {
+		return false, err
 	}
 	return n > 0, nil
+}
+
+func indexOf(a []string, s string) int {
+	for i := range a {
+		if a[i] == s {
+			return i
+		}
+	}
+	return -1
 }
 
 type sqlDialect interface {
@@ -406,9 +583,29 @@ type sqlDialect interface {
 	table(context.Context, dialect.Tx, string) (*Table, error)
 	tableExist(context.Context, dialect.Tx, string) (bool, error)
 	fkExist(context.Context, dialect.Tx, string) (bool, error)
-	setRange(context.Context, dialect.Tx, string, int) error
+	setRange(context.Context, dialect.Tx, *Table, int) error
+	dropIndex(context.Context, dialect.Tx, *Index, string) error
 	// table, column and index builder per dialect.
 	cType(*Column) string
 	tBuilder(*Table) *sql.TableBuilder
-	cBuilder(*Column) *sql.ColumnBuilder
+	addIndex(*Index, string) *sql.IndexBuilder
+	alterColumns(table string, add, modify, drop []*Column) sql.Queries
+}
+
+type preparer interface {
+	prepare(context.Context, dialect.Tx, *changes, string) error
+}
+
+// fkRenamer is used by the fixture migration (to solve #285),
+// and it's implemented by the different dialects for renaming FKs.
+type fkRenamer interface {
+	tableSchema() sql.Querier
+	isImplicitIndex(*Index, *Column) bool
+	renameIndex(*Table, *Index, *Index) sql.Querier
+	renameColumn(*Table, *Column, *Column) sql.Querier
+}
+
+// verifyRanger wraps the method for verifying global-id range correctness.
+type verifyRanger interface {
+	verifyRange(context.Context, dialect.Tx, *Table, int) error
 }

@@ -15,14 +15,21 @@
       "code-gen",
       "crud",
       "traversals",
+      "eager-load",
       "aggregate",
       "predicates",
       "paging",
+      "hooks",
       "transactions"
     ],
     "Migration": [
       "migrate",
       "dialects"
+    ],
+    "Misc": [
+      "sql-integration",
+      "testing",
+      "templates"
     ]
   }
 }

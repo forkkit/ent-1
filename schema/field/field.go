@@ -5,30 +5,15 @@
 package field
 
 import (
+	"database/sql"
+	"database/sql/driver"
 	"errors"
+	"fmt"
 	"math"
 	"reflect"
 	"regexp"
 	"time"
 )
-
-// A Descriptor for field configuration.
-type Descriptor struct {
-	Tag           string        // struct tag.
-	Size          int           // varchar size.
-	Name          string        // field name.
-	Info          *TypeInfo     // field type info.
-	Unique        bool          // unique index of field.
-	Nillable      bool          // nillable struct field.
-	Optional      bool          // nullable field in database.
-	Immutable     bool          // create-only field.
-	Default       interface{}   // default value on create.
-	UpdateDefault interface{}   // default value on update.
-	Validators    []interface{} // validator functions.
-	StorageKey    string        // sql column or gremlin property.
-	Enums         []string      // enum values.
-	Sensitive     bool          // sensitive info string field.
-}
 
 // String returns a new Field with type string.
 func String(name string) *stringBuilder {
@@ -83,7 +68,7 @@ func Time(name string) *timeBuilder {
 //	field.JSON("info", &Info{}).
 //		Optional()
 //
-func JSON(name string, typ interface{}) *jsonsBuilder {
+func JSON(name string, typ interface{}) *jsonBuilder {
 	t := reflect.TypeOf(typ)
 	info := &TypeInfo{
 		Type:    TypeJSON,
@@ -94,24 +79,24 @@ func JSON(name string, typ interface{}) *jsonsBuilder {
 	case reflect.Slice, reflect.Array, reflect.Ptr, reflect.Map:
 		info.Nillable = true
 	}
-	return &jsonsBuilder{&Descriptor{
+	return &jsonBuilder{&Descriptor{
 		Name: name,
 		Info: info,
 	}}
 }
 
 // Strings returns a new JSON Field with type []string.
-func Strings(name string) *jsonsBuilder {
+func Strings(name string) *jsonBuilder {
 	return JSON(name, []string{})
 }
 
 // Ints returns a new JSON Field with type []int.
-func Ints(name string) *jsonsBuilder {
+func Ints(name string) *jsonBuilder {
 	return JSON(name, []int{})
 }
 
 // Floats returns a new JSON Field with type []float.
-func Floats(name string) *jsonsBuilder {
+func Floats(name string) *jsonBuilder {
 	return JSON(name, []float64{})
 }
 
@@ -128,6 +113,23 @@ func Enum(name string) *enumBuilder {
 	return &enumBuilder{&Descriptor{
 		Name: name,
 		Info: &TypeInfo{Type: TypeEnum},
+	}}
+}
+
+// UUID returns a new Field with type UUID. An example for defining UUID field is as follows:
+//
+//	field.UUID("id", uuid.New())
+//
+func UUID(name string, typ driver.Valuer) *uuidBuilder {
+	rt := reflect.TypeOf(typ)
+	return &uuidBuilder{&Descriptor{
+		Name: name,
+		Info: &TypeInfo{
+			Type:     TypeUUID,
+			Nillable: true,
+			Ident:    rt.String(),
+			PkgPath:  rt.PkgPath(),
+		},
 	}}
 }
 
@@ -183,7 +185,7 @@ func (b *stringBuilder) MaxLen(i int) *stringBuilder {
 	b.desc.Size = i
 	b.desc.Validators = append(b.desc.Validators, func(v string) error {
 		if len(v) > i {
-			return errors.New("value is less than the required length")
+			return errors.New("value is greater than the required length")
 		}
 		return nil
 	})
@@ -223,7 +225,7 @@ func (b *stringBuilder) Immutable() *stringBuilder {
 }
 
 // Comment sets the comment of the field.
-func (b *stringBuilder) Comment(c string) *stringBuilder {
+func (b *stringBuilder) Comment(string) *stringBuilder {
 	return b
 }
 
@@ -237,6 +239,30 @@ func (b *stringBuilder) StructTag(s string) *stringBuilder {
 // In SQL dialects is the column name and Gremlin is the property.
 func (b *stringBuilder) StorageKey(key string) *stringBuilder {
 	b.desc.StorageKey = key
+	return b
+}
+
+// SchemaType overrides the default database type with a custom
+// schema type (per dialect) for string.
+//
+//	field.String("name").
+//		SchemaType(map[string]string{
+//			dialect.MySQL:    "text",
+//			dialect.Postgres: "varchar",
+//		})
+//
+func (b *stringBuilder) SchemaType(types map[string]string) *stringBuilder {
+	b.desc.SchemaType = types
+	return b
+}
+
+// GoType overrides the default Go type with a custom one.
+//
+//	field.String("dir").
+//		GoType(http.Dir("dir"))
+//
+func (b *stringBuilder) GoType(typ interface{}) *stringBuilder {
+	b.desc.goType(typ, stringType)
 	return b
 }
 
@@ -311,9 +337,33 @@ func (b *timeBuilder) StorageKey(key string) *timeBuilder {
 	return b
 }
 
+// GoType overrides the default Go type with a custom one.
+//
+//	field.Time("deleted_at").
+//		GoType(&sql.NullTime{})
+//
+func (b *timeBuilder) GoType(typ interface{}) *timeBuilder {
+	b.desc.goType(typ, timeType)
+	return b
+}
+
 // Descriptor implements the ent.Field interface by returning its descriptor.
 func (b *timeBuilder) Descriptor() *Descriptor {
 	return b.desc
+}
+
+// SchemaType overrides the default database type with a custom
+// schema type (per dialect) for time.
+//
+//	field.Time("created_at").
+//		SchemaType(map[string]string{
+//			dialect.MySQL:    "datetime",
+//			dialect.Postgres: "time with time zone",
+//		})
+//
+func (b *timeBuilder) SchemaType(types map[string]string) *timeBuilder {
+	b.desc.SchemaType = types
+	return b
 }
 
 // boolBuilder is the builder for boolean fields.
@@ -362,6 +412,16 @@ func (b *boolBuilder) StructTag(s string) *boolBuilder {
 // In SQL dialects is the column name and Gremlin is the property.
 func (b *boolBuilder) StorageKey(key string) *boolBuilder {
 	b.desc.StorageKey = key
+	return b
+}
+
+// GoType overrides the default Go type with a custom one.
+//
+//	field.Bool("deleted").
+//		GoType(&sql.NullBool{})
+//
+func (b *boolBuilder) GoType(typ interface{}) *boolBuilder {
+	b.desc.goType(typ, boolType)
 	return b
 }
 
@@ -427,49 +487,87 @@ func (b *bytesBuilder) StorageKey(key string) *bytesBuilder {
 	return b
 }
 
+// GoType overrides the default Go type with a custom one.
+//
+//	field.Bytes("ip").
+//		GoType(net.IP("127.0.0.1"))
+//
+func (b *bytesBuilder) GoType(typ interface{}) *bytesBuilder {
+	b.desc.goType(typ, bytesType)
+	return b
+}
+
 // Descriptor implements the ent.Field interface by returning its descriptor.
 func (b *bytesBuilder) Descriptor() *Descriptor {
 	return b.desc
 }
 
-// jsonsBuilder is the builder for json fields.
-type jsonsBuilder struct {
+// SchemaType overrides the default database type with a custom
+// schema type (per dialect) for bytes.
+//
+//	field.Bytes("blob").
+//		SchemaType(map[string]string{
+//			dialect.MySQL:	"tinyblob",
+//			dialect.SQLite:	"tinyblob",
+//		})
+//
+func (b *bytesBuilder) SchemaType(types map[string]string) *bytesBuilder {
+	b.desc.SchemaType = types
+	return b
+}
+
+// jsonBuilder is the builder for json fields.
+type jsonBuilder struct {
 	desc *Descriptor
 }
 
 // StorageKey sets the storage key of the field.
 // In SQL dialects is the column name and Gremlin is the property.
-func (b *jsonsBuilder) StorageKey(key string) *jsonsBuilder {
+func (b *jsonBuilder) StorageKey(key string) *jsonBuilder {
 	b.desc.StorageKey = key
 	return b
 }
 
 // Optional indicates that this field is optional on create.
 // Unlike edges, fields are required by default.
-func (b *jsonsBuilder) Optional() *jsonsBuilder {
+func (b *jsonBuilder) Optional() *jsonBuilder {
 	b.desc.Optional = true
 	return b
 }
 
 // Immutable indicates that this field cannot be updated.
-func (b *jsonsBuilder) Immutable() *jsonsBuilder {
+func (b *jsonBuilder) Immutable() *jsonBuilder {
 	b.desc.Immutable = true
 	return b
 }
 
 // Comment sets the comment of the field.
-func (b *jsonsBuilder) Comment(c string) *jsonsBuilder {
+func (b *jsonBuilder) Comment(c string) *jsonBuilder {
 	return b
 }
 
 // StructTag sets the struct tag of the field.
-func (b *jsonsBuilder) StructTag(s string) *jsonsBuilder {
+func (b *jsonBuilder) StructTag(s string) *jsonBuilder {
 	b.desc.Tag = s
 	return b
 }
 
+// SchemaType overrides the default database type with a custom
+// schema type (per dialect) for json.
+//
+//	field.JSON("json").
+//		SchemaType(map[string]string{
+//			dialect.MySQL:		"json",
+//			dialect.Postgres:	"jsonb",
+//		})
+//
+func (b *jsonBuilder) SchemaType(types map[string]string) *jsonBuilder {
+	b.desc.SchemaType = types
+	return b
+}
+
 // Descriptor implements the ent.Field interface by returning its descriptor.
-func (b *jsonsBuilder) Descriptor() *Descriptor {
+func (b *jsonBuilder) Descriptor() *Descriptor {
 	return b.desc
 }
 
@@ -481,6 +579,12 @@ type enumBuilder struct {
 // Value sets the numeric value of the enum. Defaults to its index in the declaration.
 func (b *enumBuilder) Values(values ...string) *enumBuilder {
 	b.desc.Enums = values
+	return b
+}
+
+// Default sets the default value of the field.
+func (b *enumBuilder) Default(value string) *enumBuilder {
+	b.desc.Default = value
 	return b
 }
 
@@ -522,7 +626,179 @@ func (b *enumBuilder) StructTag(s string) *enumBuilder {
 	return b
 }
 
+// SchemaType overrides the default database type with a custom
+// schema type (per dialect) for enum.
+//
+//	field.Enum("enum").
+//		SchemaType(map[string]string{
+//			dialect.Postgres: "EnumType",
+//		})
+//
+func (b *enumBuilder) SchemaType(types map[string]string) *enumBuilder {
+	b.desc.SchemaType = types
+	return b
+}
+
 // Descriptor implements the ent.Field interface by returning its descriptor.
 func (b *enumBuilder) Descriptor() *Descriptor {
 	return b.desc
+}
+
+// uuidBuilder is the builder for uuid fields.
+type uuidBuilder struct {
+	desc *Descriptor
+}
+
+// StorageKey sets the storage key of the field.
+// In SQL dialects is the column name and Gremlin is the property.
+func (b *uuidBuilder) StorageKey(key string) *uuidBuilder {
+	b.desc.StorageKey = key
+	return b
+}
+
+// Optional indicates that this field is optional on create.
+// Unlike edges, fields are required by default.
+func (b *uuidBuilder) Optional() *uuidBuilder {
+	b.desc.Optional = true
+	return b
+}
+
+// Immutable indicates that this field cannot be updated.
+func (b *uuidBuilder) Immutable() *uuidBuilder {
+	b.desc.Immutable = true
+	return b
+}
+
+// Comment sets the comment of the field.
+func (b *uuidBuilder) Comment(c string) *uuidBuilder {
+	return b
+}
+
+// StructTag sets the struct tag of the field.
+func (b *uuidBuilder) StructTag(s string) *uuidBuilder {
+	b.desc.Tag = s
+	return b
+}
+
+// Default sets the function that is applied to set default value
+// of the field on creation. Codegen fails if the default function
+// doesn't return the same concrete that was set for the UUID type.
+//
+//	field.UUID("id", uuid.UUID{}).
+//		Default(uuid.New)
+//
+func (b *uuidBuilder) Default(fn interface{}) *uuidBuilder {
+	typ := reflect.TypeOf(fn)
+	if typ.Kind() != reflect.Func || typ.NumIn() != 0 || typ.NumOut() != 1 || typ.Out(0).String() != b.desc.Info.String() {
+		b.desc.err = fmt.Errorf("expect type (func() %s) for uuid default value", b.desc.Info)
+	}
+	b.desc.Default = fn
+	return b
+}
+
+// SchemaType overrides the default database type with a custom
+// schema type (per dialect) for uuid.
+//
+//	field.UUID("id", uuid.New()).
+//		SchemaType(map[string]string{
+//			dialect.Postgres: "CustomUUID",
+//		})
+//
+func (b *uuidBuilder) SchemaType(types map[string]string) *uuidBuilder {
+	b.desc.SchemaType = types
+	return b
+}
+
+// Descriptor implements the ent.Field interface by returning its descriptor.
+func (b *uuidBuilder) Descriptor() *Descriptor {
+	return b.desc
+}
+
+// A Descriptor for field configuration.
+type Descriptor struct {
+	Tag           string            // struct tag.
+	Size          int               // varchar size.
+	Name          string            // field name.
+	Info          *TypeInfo         // field type info.
+	Unique        bool              // unique index of field.
+	Nillable      bool              // nillable struct field.
+	Optional      bool              // nullable field in database.
+	Immutable     bool              // create-only field.
+	Default       interface{}       // default value on create.
+	UpdateDefault interface{}       // default value on update.
+	Validators    []interface{}     // validator functions.
+	StorageKey    string            // sql column or gremlin property.
+	Enums         []string          // enum values.
+	Sensitive     bool              // sensitive info string field.
+	SchemaType    map[string]string // override the schema type.
+	err           error
+}
+
+// Err returns the error, if any, that was added by the field builder.
+func (d *Descriptor) Err() error {
+	return d.err
+}
+
+func (d *Descriptor) goType(typ interface{}, expectType reflect.Type) {
+	t := reflect.TypeOf(typ)
+	tv := indirect(t)
+	info := &TypeInfo{
+		Type:    d.Info.Type,
+		Ident:   tv.String(),
+		PkgPath: tv.PkgPath(),
+		RType: &RType{
+			Name:    tv.Name(),
+			Kind:    tv.Kind(),
+			PkgPath: tv.PkgPath(),
+			Methods: make(map[string]struct{ In, Out []*RType }, t.NumMethod()),
+		},
+	}
+	switch t.Kind() {
+	case reflect.Slice, reflect.Array, reflect.Ptr, reflect.Map:
+		info.Nillable = true
+	}
+	switch {
+	case t.Kind() == expectType.Kind() && t.ConvertibleTo(expectType):
+	case t.Implements(valueScannerType):
+		n := t.NumMethod()
+		for i := 0; i < n; i++ {
+			m := t.Method(i)
+			in := make([]*RType, m.Type.NumIn()-1)
+			for j := range in {
+				arg := m.Type.In(j + 1)
+				in[j] = &RType{Name: arg.Name(), Kind: arg.Kind(), PkgPath: arg.PkgPath()}
+			}
+			out := make([]*RType, m.Type.NumOut())
+			for j := range out {
+				ret := m.Type.Out(j)
+				out[j] = &RType{Name: ret.Name(), Kind: ret.Kind(), PkgPath: ret.PkgPath()}
+			}
+			info.RType.Methods[m.Name] = struct{ In, Out []*RType }{in, out}
+		}
+	default:
+		d.err = fmt.Errorf("GoType must be a %q type or ValueScanner", expectType)
+	}
+	d.Info = info
+}
+
+var (
+	boolType         = reflect.TypeOf(false)
+	bytesType        = reflect.TypeOf([]byte(nil))
+	timeType         = reflect.TypeOf(time.Time{})
+	stringType       = reflect.TypeOf("")
+	valueScannerType = reflect.TypeOf((*ValueScanner)(nil)).Elem()
+)
+
+// ValueScanner is the interface that groups the Value and the Scan methods.
+type ValueScanner interface {
+	driver.Valuer
+	sql.Scanner
+}
+
+// indirect returns the type at the end of indirection.
+func indirect(t reflect.Type) reflect.Type {
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	return t
 }

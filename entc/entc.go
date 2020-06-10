@@ -4,13 +4,15 @@
 
 // Package entc provides an interface for interacting with
 // entc (ent codegen) as a package rather than an executable.
-
 package entc
 
 import (
+	"fmt"
+	"go/token"
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"text/template"
 
 	"github.com/facebookincubator/ent/entc/gen"
@@ -18,7 +20,7 @@ import (
 )
 
 // LoadGraph loads the schema package from the given schema path,
-// and construct a *gen.Graph.
+// and constructs a *gen.Graph.
 func LoadGraph(schemaPath string, cfg *gen.Config) (*gen.Graph, error) {
 	spec, err := (&load.Config{Path: schemaPath}).Load()
 	if err != nil {
@@ -27,7 +29,7 @@ func LoadGraph(schemaPath string, cfg *gen.Config) (*gen.Graph, error) {
 	cfg.Schema = spec.PkgPath
 	if cfg.Package == "" {
 		// default package-path for codegen is one package
-		// above the schema package (`<project>/ent/schema`).
+		// before the schema package (`<project>/ent/schema`).
 		cfg.Package = path.Dir(spec.PkgPath)
 	}
 	return gen.NewGraph(cfg, spec.Schemas...)
@@ -45,7 +47,7 @@ func LoadGraph(schemaPath string, cfg *gen.Config) (*gen.Graph, error) {
 //		IDType: &field.TypeInfo{Type: field.TypeInt},
 //	})
 //
-func Generate(schemaPath string, cfg *gen.Config, options ...Option) error {
+func Generate(schemaPath string, cfg *gen.Config, options ...Option) (err error) {
 	if cfg.Target == "" {
 		abs, err := filepath.Abs(schemaPath)
 		if err != nil {
@@ -60,33 +62,55 @@ func Generate(schemaPath string, cfg *gen.Config, options ...Option) error {
 			return err
 		}
 	}
-	if len(cfg.Storage) == 0 {
+	if cfg.Storage == nil {
 		driver, err := gen.NewStorage("sql")
 		if err != nil {
 			return err
 		}
-		cfg.Storage = append(cfg.Storage, driver)
+		cfg.Storage = driver
 	}
+	undo, err := gen.PrepareEnv(cfg)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = undo()
+		}
+	}()
 	graph, err := LoadGraph(schemaPath, cfg)
 	if err != nil {
+		return err
+	}
+	if err := normalizePkg(cfg); err != nil {
 		return err
 	}
 	return graph.Gen()
 }
 
+func normalizePkg(c *gen.Config) error {
+	base := path.Base(c.Package)
+	if strings.ContainsRune(base, '-') {
+		base = strings.ReplaceAll(base, "-", "_")
+		c.Package = path.Join(path.Dir(c.Package), base)
+	}
+	if !token.IsIdentifier(base) {
+		return fmt.Errorf("invalid package identifier: %q", base)
+	}
+	return nil
+}
+
 // Option allows for managing codegen configuration using functional options.
 type Option func(*gen.Config) error
 
-// Storage sets the list of storage-driver types to support by the codegen.
-func Storage(types ...string) Option {
+// Storage sets the storage-driver type to support by the codegen.
+func Storage(typ string) Option {
 	return func(cfg *gen.Config) error {
-		for _, t := range types {
-			storage, err := gen.NewStorage(t)
-			if err != nil {
-				return err
-			}
-			cfg.Storage = append(cfg.Storage, storage)
+		storage, err := gen.NewStorage(typ)
+		if err != nil {
+			return err
 		}
+		cfg.Storage = storage
 		return nil
 	}
 }
@@ -112,8 +136,11 @@ func TemplateGlob(pattern string) Option {
 // TemplateDir parses the template definitions from the files in the directory
 // and associates the resulting templates with codegen templates.
 func TemplateDir(path string) Option {
-	return templateOption(func(cfg *gen.Config) (err error) {
+	return templateOption(func(cfg *gen.Config) error {
 		return filepath.Walk(path, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return fmt.Errorf("load template: %v", err)
+			}
 			if info.IsDir() {
 				return nil
 			}

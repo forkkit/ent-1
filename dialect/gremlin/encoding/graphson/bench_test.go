@@ -7,7 +7,7 @@ package graphson
 import (
 	"testing"
 
-	"github.com/json-iterator/go"
+	jsoniter "github.com/json-iterator/go"
 )
 
 type book struct {
@@ -75,7 +75,6 @@ func BenchmarkMarshalInterface(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
-
 }
 
 func BenchmarkUnmarshalInterface(b *testing.B) {

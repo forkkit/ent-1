@@ -7,7 +7,6 @@ package load
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/format"
@@ -27,7 +26,6 @@ import (
 	"github.com/facebookincubator/ent"
 	"github.com/facebookincubator/ent/entc/load/internal"
 
-	"github.com/pkg/errors"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -35,9 +33,7 @@ import (
 type SchemaSpec struct {
 	// Schemas are the schema descriptors.
 	Schemas []*Schema
-	// PkgPath is the path where the schema package reside.
-	// Note that path can be either a package path (e.g. github.com/a8m/x)
-	// or a filepath (e.g. ./ent/schema).
+	// PkgPath is the package path of the schema.
 	PkgPath string
 }
 
@@ -48,18 +44,16 @@ type Config struct {
 	// Names are the schema names to run the code generation on.
 	// Empty means all schemas in the directory.
 	Names []string
-	// schema types and their exported struct fields.
-	fields map[string][]*StructField
 }
 
-// Build loads the schemas package and build the Go plugin with this info.
+// Load loads the schemas package and build the Go plugin with this info.
 func (c *Config) Load() (*SchemaSpec, error) {
 	pkgPath, err := c.load()
 	if err != nil {
-		return nil, errors.WithMessage(err, "load schemas dir")
+		return nil, fmt.Errorf("load schemas dir: %v", err)
 	}
 	if len(c.Names) == 0 {
-		return nil, errors.Errorf("no schema found in: %s", c.Path)
+		return nil, fmt.Errorf("no schema found in: %s", c.Path)
 	}
 	b := bytes.NewBuffer(nil)
 	err = buildTmpl.ExecuteTemplate(b, "main", struct {
@@ -67,43 +61,51 @@ func (c *Config) Load() (*SchemaSpec, error) {
 		Package string
 	}{c, pkgPath})
 	if err != nil {
-		return nil, errors.WithMessage(err, "execute template")
+		return nil, fmt.Errorf("execute template: %v", err)
 	}
 	buf, err := format.Source(b.Bytes())
 	if err != nil {
-		return nil, errors.WithMessage(err, "format template")
+		return nil, fmt.Errorf("format template: %v", err)
 	}
-	target := fmt.Sprintf("%s.go", filename(pkgPath))
+	if err := os.MkdirAll(".entc", os.ModePerm); err != nil {
+		return nil, err
+	}
+	target := fmt.Sprintf(".entc/%s.go", filename(pkgPath))
 	if err := ioutil.WriteFile(target, buf, 0644); err != nil {
-		return nil, errors.WithMessagef(err, "write file %s", target)
+		return nil, fmt.Errorf("write file %s: %v", target, err)
 	}
-	defer os.Remove(target)
+	defer os.RemoveAll(".entc")
 	out, err := run(target)
 	if err != nil {
 		return nil, err
 	}
 	spec := &SchemaSpec{PkgPath: pkgPath}
 	for _, line := range strings.Split(out, "\n") {
-		schema := &Schema{}
-		if err := json.Unmarshal([]byte(line), schema); err != nil {
-			return nil, errors.WithMessagef(err, "unmarshal schema %s", line)
+		schema, err := UnmarshalSchema([]byte(line))
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal schema %s: %v", line, err)
 		}
-		schema.StructFields = c.fields[schema.Name]
 		spec.Schemas = append(spec.Schemas, schema)
 	}
 	return spec, nil
 }
 
-// entInterface represents the the ent.Interface type.
+// entInterface holds the reflect.Type of ent.Interface.
 var entInterface = reflect.TypeOf(struct{ ent.Interface }{}).Field(0).Type
 
 // load loads the schemas info.
 func (c *Config) load() (string, error) {
 	pkgs, err := packages.Load(&packages.Config{Mode: packages.LoadSyntax}, c.Path, entInterface.PkgPath())
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("loading package: %v", err)
+	}
+	if len(pkgs) < 2 {
+		return "", fmt.Errorf("missing package information for: %s", c.Path)
 	}
 	entPkg, pkg := pkgs[0], pkgs[1]
+	if len(pkg.Errors) != 0 {
+		return "", pkg.Errors[0]
+	}
 	if pkgs[0].PkgPath != entInterface.PkgPath() {
 		entPkg, pkg = pkgs[1], pkgs[0]
 	}
@@ -118,12 +120,8 @@ func (c *Config) load() (string, error) {
 		if !ok {
 			return "", fmt.Errorf("invalid declaration %T for %s", k.Obj.Decl, k.Name)
 		}
-		specType, ok := spec.Type.(*ast.StructType)
-		if !ok {
+		if _, ok := spec.Type.(*ast.StructType); !ok {
 			return "", fmt.Errorf("invalid spec type %T for %s", spec.Type, k.Name)
-		}
-		if err := c.structFields(k.Name, v, specType); err != nil {
-			return "", err
 		}
 		names = append(names, k.Name)
 	}
@@ -131,75 +129,17 @@ func (c *Config) load() (string, error) {
 		c.Names = names
 	}
 	sort.Strings(c.Names)
-	return pkg.PkgPath, err
+	return pkg.PkgPath, nil
 }
 
-// structFields loads schema type fields if exist.
-func (c *Config) structFields(name string, obj types.Object, spec *ast.StructType) (err error) {
-	typ, ok := obj.(*types.TypeName)
-	if !ok {
-		return
-	}
-	st, ok := typ.Type().Underlying().(*types.Struct)
-	if !ok {
-		return
-	}
-	if c.fields == nil {
-		c.fields = make(map[string][]*StructField)
-	}
-	for i := 0; i < st.NumFields(); i++ {
-		f := st.Field(i)
-		// skip non-exported fields, because they
-		// cannot be used outside the package.
-		if !f.Exported() {
-			continue
-		}
-		sf := &StructField{
-			Tag:      st.Tag(i),
-			Name:     f.Name(),
-			Embedded: f.Embedded(),
-			Comment:  strings.TrimSpace(spec.Fields.List[i].Comment.Text()),
-			Type: types.TypeString(f.Type(), func(p *types.Package) string {
-				return p.Name()
-			}),
-		}
-		switch typ := indirectType(f.Type()).(type) {
-		case *types.Named:
-			sf.PkgPath = typ.Obj().Pkg().Path()
-			// skip fields used for schema definition.
-			if sf.PkgPath == entInterface.PkgPath() {
-				continue
-			}
-			c.fields[name] = append(c.fields[name], sf)
-		default:
-			if f.Embedded() {
-				return fmt.Errorf("field %s for schema %q cannot be embbeded", f.Type(), name)
-			}
-			c.fields[name] = append(c.fields[name], sf)
-		}
-	}
-	return
-}
-
-// indirectType returns the type at the end of indirection.
-func indirectType(typ types.Type) types.Type {
-	for {
-		ptr, ok := typ.(*types.Pointer)
-		if !ok {
-			return typ
-		}
-		typ = ptr.Elem()
-	}
-}
-
-//go:generate go run github.com/go-bindata/go-bindata/go-bindata -pkg=internal -o=internal/bindata.go ./template/... schema.go
+//go:generate go run github.com/go-bindata/go-bindata/go-bindata -pkg=internal -o=internal/bindata.go -modtime=1 ./template/... schema.go
 
 var buildTmpl = templates()
 
 func templates() *template.Template {
 	tmpl := template.New("templates").Funcs(template.FuncMap{"base": filepath.Base})
 	tmpl = template.Must(tmpl.Parse(string(internal.MustAsset("template/main.tmpl"))))
-	// turns the schema file and its imports into templates.
+	// Turns the schema file and its imports into templates.
 	tmpls, err := schemaTemplates()
 	if err != nil {
 		panic(err)
@@ -220,7 +160,7 @@ func schemaTemplates() ([]string, error) {
 	)
 	f, err := parser.ParseFile(fset, name, string(internal.MustAsset(name)), parser.AllErrors)
 	if err != nil {
-		return nil, errors.WithMessagef(err, "parse file: %s", name)
+		return nil, fmt.Errorf("parse file: %s: %v", name, err)
 	}
 	for _, decl := range f.Decls {
 		if decl, ok := decl.(*ast.GenDecl); ok && decl.Tok == token.IMPORT {
@@ -230,7 +170,7 @@ func schemaTemplates() ([]string, error) {
 			continue
 		}
 		if err := format.Node(&code, fset, decl); err != nil {
-			return nil, errors.WithMessage(err, "format node")
+			return nil, fmt.Errorf("format node: %v", err)
 		}
 		code.WriteByte('\n')
 	}
@@ -248,10 +188,10 @@ func filename(pkg string) string {
 // run 'go run' command and return its output.
 func run(target string) (string, error) {
 	cmd := exec.Command("go", "run", target)
-	stdout := bytes.NewBuffer(nil)
 	stderr := bytes.NewBuffer(nil)
-	cmd.Stdout = stdout
+	stdout := bytes.NewBuffer(nil)
 	cmd.Stderr = stderr
+	cmd.Stdout = stdout
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("entc/load: %s", stderr)
 	}

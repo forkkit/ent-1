@@ -5,6 +5,7 @@
 package sql
 
 import (
+	"database/sql"
 	"fmt"
 	"reflect"
 	"strings"
@@ -16,9 +17,61 @@ type ColumnScanner interface {
 	Next() bool
 	Scan(...interface{}) error
 	Columns() ([]string, error)
+	Err() error
 }
 
-// ScanSlice scans the given ColumnScanner (basically, sql.Rows or sql.Rows) into the given slice.
+// ScanOne scans one row to the given value. It fails if the rows holds more than 1 row.
+func ScanOne(rows ColumnScanner, v interface{}) error {
+	columns, err := rows.Columns()
+	if err != nil {
+		return fmt.Errorf("sql/scan: failed getting column names: %v", err)
+	}
+	if n := len(columns); n != 1 {
+		return fmt.Errorf("sql/scan: unexpected number of columns: %d", n)
+	}
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return sql.ErrNoRows
+	}
+	if err := rows.Scan(v); err != nil {
+		return err
+	}
+	if rows.Next() {
+		return fmt.Errorf("sql/scan: expect exactly one row in result set")
+	}
+	return rows.Err()
+}
+
+// ScanInt64 scans and returns an int64 from the rows columns.
+func ScanInt64(rows ColumnScanner) (int64, error) {
+	var n int64
+	if err := ScanOne(rows, &n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// ScanInt scans and returns an int from the rows columns.
+func ScanInt(rows ColumnScanner) (int, error) {
+	n, err := ScanInt64(rows)
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
+}
+
+// ScanString scans and returns a string from the rows columns.
+func ScanString(rows ColumnScanner) (string, error) {
+	var s string
+	if err := ScanOne(rows, &s); err != nil {
+		return "", err
+	}
+	return s, nil
+}
+
+// ScanSlice scans the given ColumnScanner (basically, sql.Row or sql.Rows) into the given slice.
 func ScanSlice(rows ColumnScanner, v interface{}) error {
 	columns, err := rows.Columns()
 	if err != nil {
@@ -28,37 +81,9 @@ func ScanSlice(rows ColumnScanner, v interface{}) error {
 	if k := rv.Kind(); k != reflect.Slice {
 		return fmt.Errorf("sql/scan: invalid type %s. expected slice as an argument", k)
 	}
-	var (
-		scan *rowScan
-		typ  = rv.Type().Elem()
-	)
-	switch k := typ.Kind(); {
-	case k == reflect.String || k >= reflect.Bool && k <= reflect.Float64:
-		scan = &rowScan{
-			columns: []reflect.Type{typ},
-			value: func(v ...interface{}) reflect.Value {
-				return reflect.Indirect(reflect.ValueOf(v[0]))
-			},
-		}
-	case k == reflect.Ptr:
-		typ = typ.Elem()
-		if scan, err = scanStruct(typ, columns); err != nil {
-			return err
-		}
-		wrap := scan.value
-		scan.value = func(vs ...interface{}) reflect.Value {
-			v := wrap(vs...)
-			pt := reflect.PtrTo(v.Type())
-			pv := reflect.New(pt.Elem())
-			pv.Elem().Set(v)
-			return pv
-		}
-	case k == reflect.Struct:
-		if scan, err = scanStruct(typ, columns); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("sql/scan: unsupported type ([]%s)", k)
+	scan, err := scanType(rv.Type().Elem(), columns)
+	if err != nil {
+		return err
 	}
 	if n, m := len(columns), len(scan.columns); n > m {
 		return fmt.Errorf("sql/scan: columns do not match (%d > %d)", n, m)
@@ -71,7 +96,7 @@ func ScanSlice(rows ColumnScanner, v interface{}) error {
 		vv := reflect.Append(rv, scan.value(values...))
 		rv.Set(vv)
 	}
-	return nil
+	return rows.Err()
 }
 
 // rowScan is the configuration for scanning one sql.Row.
@@ -91,6 +116,27 @@ func (r *rowScan) values() []interface{} {
 	return values
 }
 
+// scanType returns rowScan for the given reflect.Type.
+func scanType(typ reflect.Type, columns []string) (*rowScan, error) {
+	switch k := typ.Kind(); {
+	case k == reflect.Interface && typ.NumMethod() == 0:
+		fallthrough // interface{}
+	case k == reflect.String || k >= reflect.Bool && k <= reflect.Float64:
+		return &rowScan{
+			columns: []reflect.Type{typ},
+			value: func(v ...interface{}) reflect.Value {
+				return reflect.Indirect(reflect.ValueOf(v[0]))
+			},
+		}, nil
+	case k == reflect.Ptr:
+		return scanPtr(typ, columns)
+	case k == reflect.Struct:
+		return scanStruct(typ, columns)
+	default:
+		return nil, fmt.Errorf("sql/scan: unsupported type ([]%s)", k)
+	}
+}
+
 // scanStruct returns the a configuration for scanning an sql.Row into a struct.
 func scanStruct(typ reflect.Type, columns []string) (*rowScan, error) {
 	var (
@@ -101,7 +147,9 @@ func scanStruct(typ reflect.Type, columns []string) (*rowScan, error) {
 	for i := 0; i < typ.NumField(); i++ {
 		f := typ.Field(i)
 		name := strings.ToLower(f.Name)
-		if tag, ok := f.Tag.Lookup("json"); ok {
+		if tag, ok := f.Tag.Lookup("sql"); ok {
+			name = tag
+		} else if tag, ok := f.Tag.Lookup("json"); ok {
 			name = strings.Split(tag, ",")[0]
 		}
 		names[name] = i
@@ -122,6 +170,24 @@ func scanStruct(typ reflect.Type, columns []string) (*rowScan, error) {
 			st.Field(idx[i]).Set(reflect.Indirect(reflect.ValueOf(v)))
 		}
 		return st
+	}
+	return scan, nil
+}
+
+// scanPtr wraps the underlying type with rowScan.
+func scanPtr(typ reflect.Type, columns []string) (*rowScan, error) {
+	typ = typ.Elem()
+	scan, err := scanType(typ, columns)
+	if err != nil {
+		return nil, err
+	}
+	wrap := scan.value
+	scan.value = func(vs ...interface{}) reflect.Value {
+		v := wrap(vs...)
+		pt := reflect.PtrTo(v.Type())
+		pv := reflect.New(pt.Elem())
+		pv.Elem().Set(v)
+		return pv
 	}
 	return scan, nil
 }

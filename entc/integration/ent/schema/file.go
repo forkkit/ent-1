@@ -43,6 +43,7 @@ func (File) Edges() []ent.Edge {
 		edge.From("type", FileType.Type).
 			Ref("files").
 			Unique(),
+		edge.To("field", FieldType.Type),
 	}
 }
 
@@ -50,14 +51,19 @@ func (File) Edges() []ent.Edge {
 func (File) Indexes() []ent.Index {
 	return []ent.Index{
 		// non-unique index should not prevent duplicates.
-		index.Fields("name", "size"),
+		index.Fields("name", "size").
+			StorageKey("file_name_size"),
 		// unique index prevents duplicates records.
 		index.Fields("name", "user").
 			Unique(),
+		// index on edges only.
+		index.Edges("owner", "type"),
 		// unique index under the "owner" sub-tree.
 		// user/owner can't have files with duplicate names.
 		index.Fields("name").
 			Edges("owner", "type").
 			Unique(),
+		index.Fields("name").
+			Edges("owner"),
 	}
 }

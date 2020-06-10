@@ -14,133 +14,128 @@ in the LICENSE file in the root directory of this source tree.
 
 // ID filters vertices based on their identifier.
 func ID(id {{ $.ID.Type }}) predicate.{{ $.Name }} {
-	return predicate.{{ $.Name }}{{ if gt (len $.Storage) 1 }}PerDialect{{ end }}(
-		{{ range $_, $storage := $.Storage -}}
-			{{ $tmpl := printf "dialect/%s/predicate/id" $storage }}
-			{{- xtemplate $tmpl $ }},
-		{{ end -}}
+	return predicate.{{ $.Name }}(
+		{{- $tmpl := printf "dialect/%s/predicate/id" $.Storage }}
+		{{- xtemplate $tmpl $ -}}
 	)
 }
 
-{{ range $_, $op := ops $.ID }}
+{{ range $op := ops $.ID }}
 	{{ $arg := "id" }}{{ if $op.Variadic }}{{ $arg = "ids" }}{{ end }}
 	{{ $func := printf "ID%s" $op.Name }}
 	// {{ $func }} applies the {{ $op.Name }} predicate on the ID field.
 	func {{ $func }}({{ $arg }} {{ if $op.Variadic }}...{{ end }}{{ $.ID.Type }}) predicate.{{ $.Name }} {
-		return predicate.{{ $.Name }}{{ if gt (len $.Storage) 1 }}PerDialect{{ end }}(
-			{{ range $_, $storage := $.Storage -}}
-				{{- with extend $ "Arg" $arg "Op" $op "Storage" $storage -}}
-					{{ $tmpl := printf "dialect/%s/predicate/id/ops" $storage }}
-					{{- xtemplate $tmpl . }},
-				{{ end -}}
-			{{ end -}}
+		return predicate.{{ $.Name }}(
+			{{- with extend $ "Arg" $arg "Op" $op "Storage" $.Storage -}}
+				{{ $tmpl := printf "dialect/%s/predicate/id/ops" $.Storage }}
+				{{- xtemplate $tmpl . }}
+			{{- end -}}
 		)
 	}
 {{ end }}
 
-{{ range $_, $f := $.Fields }}
+{{ range $f := $.Fields }}
 	{{/* JSON cannot be compared using "=" and Enum has a type defined with the field name */}}
-	{{- if not (or $f.IsJSON $f.IsEnum) }}
-		{{ $func := pascal $f.Name }}
+	{{ $hasP := not (or $f.IsJSON $f.IsEnum) }}
+	{{ $comparable := $f.ConvertedToBasic }}
+	{{- if and $hasP $comparable }}
+        {{ $arg := "v" }}
+		{{ $func := $f.StructField }}
 		// {{ $func }} applies equality check predicate on the {{ quote $f.Name }} field. It's identical to {{ $func }}EQ.
-		func {{ $func }}(v {{ $f.Type }}) predicate.{{ $.Name }} {
-			return predicate.{{ $.Name }}{{ if gt (len $.Storage) 1 }}PerDialect{{ end }}(
-				{{ range $_, $storage := $.Storage -}}
-					{{- with extend $ "Field" $f -}}
-						{{ $tmpl := printf "dialect/%s/predicate/field" $storage }}
-						{{- xtemplate $tmpl . }},
-					{{ end -}}
-				{{ end -}}
+		func {{ $func }}({{ $arg }} {{ $f.Type }}) predicate.{{ $.Name }} {
+			{{- if $f.HasGoType }}
+				vc := {{ $f.BasicType "v" }}
+                {{- $arg = "vc" }}
+            {{- end }}
+			return predicate.{{ $.Name }}(
+				{{- with extend $ "Arg" $arg "Field" $f -}}
+					{{ $tmpl := printf "dialect/%s/predicate/field" $.Storage }}
+					{{- xtemplate $tmpl . }}
+				{{- end -}}
 			)
 		}
 	{{- end }}
 {{ end }}
 
-{{ range $_, $f := $.Fields }}
+{{ range $f := $.Fields }}
 	{{ $ops := ops $f }}
-	{{/* storage specific predicates disabled for multi-storage codegen */}}
-	{{ if eq (len $.Storage) 1 }}
-		{{ $storage := index $.Storage 0 }}
-		{{ $ops = append $ops (call $storage.Ops $f) }}
+	{{ with $.Storage.Ops }}
+		{{ $ops = appends $ops (call $.Storage.Ops $f) }}
 	{{ end }}
-	{{ range $_, $op := $ops }}
+	{{ range $op := $ops }}
 	{{ $arg := "v" }}{{ if $op.Variadic }}{{ $arg = "vs" }}{{ end }}
-	{{ $func := print (pascal $f.Name) ($op.Name) }}
+	{{ $func := print $f.StructField $op.Name }}
 	{{ $type := $f.Type.String }}{{ if $f.IsEnum }}{{ $type = trimPackage $type $.Package }}{{ end }}
 	// {{ $func }} applies the {{ $op.Name }} predicate on the {{ quote $f.Name }} field.
 	func {{ $func }}({{ if not $op.Niladic }}{{ $arg }} {{ if $op.Variadic }}...{{ end }}{{ $type }}{{ end }}) predicate.{{ $.Name }} {
 		{{- if $op.Variadic }}
 			v := make([]interface{}, len({{ $arg }}))
 			for i := range v {
-				v[i] = {{ $arg }}[i]
+            			{{- with $f.BasicType (printf "%s[i]" $arg) }}
+					v[i] = {{ . }}
+				{{- else }}
+					v[i] = {{ $arg }}[i]
+				{{- end }}
 			}
+			{{- $arg = "v" }}
+		{{- else if and (not $op.Niladic) $f.HasGoType }}
+			vc := {{ $f.BasicType "v" }}
+			{{- $arg = "vc" }}
 		{{- end }}
-		return predicate.{{ $.Name }}{{ if gt (len $.Storage) 1 }}PerDialect{{ end }}(
-			{{ range $_, $storage := $.Storage -}}
-				{{- with extend $ "Arg" $arg "Field" $f "Op" $op "Storage" $storage -}}
-					{{ $tmpl := printf "dialect/%s/predicate/field/ops" $storage }}
-					{{- xtemplate $tmpl . }},
-				{{ end -}}
-			{{ end -}}
+		return predicate.{{ $.Name }}(
+			{{- with extend $ "Arg" $arg "Field" $f "Op" $op "Storage" $.Storage -}}
+				{{ $tmpl := printf "dialect/%s/predicate/field/ops" $.Storage }}
+				{{- xtemplate $tmpl . }}
+			{{- end -}}
 		)
 	}
 	{{ end }}
 {{ end }}
 
-{{ range $_, $e := $.Edges }}
-	{{ $func := pascal $e.Name | printf "Has%s" }}
+{{ range $e := $.Edges }}
+	{{ $func := print "Has" $e.StructField }}
 	// {{ $func }} applies the HasEdge predicate on the {{ quote $e.Name }} edge.
 	func {{ $func }}() predicate.{{ $.Name }} {
-		return predicate.{{ $.Name }}{{ if gt (len $.Storage) 1 }}PerDialect{{ end }}(
-			{{ range $_, $storage := $.Storage -}}
-				{{- with extend $ "Edge" $e -}}
-					{{ $tmpl := printf "dialect/%s/predicate/edge/has" $storage }}
-					{{- xtemplate $tmpl . }},
-				{{ end -}}
-			{{ end -}}
+		return predicate.{{ $.Name }}(
+			{{- with extend $ "Edge" $e -}}
+				{{ $tmpl := printf "dialect/%s/predicate/edge/has" $.Storage }}
+				{{- xtemplate $tmpl . }}
+			{{- end -}}
 		)
 	}
 	{{ $func = printf "%sWith" $func }}
 	// {{ $func }} applies the HasEdge predicate on the {{ quote $e.Name }} edge with a given conditions (other predicates).
 	func {{ $func }}(preds ...predicate.{{ $e.Type.Name }}) predicate.{{ $.Name }} {
-		return predicate.{{ $.Name }}{{ if gt (len $.Storage) 1 }}PerDialect{{ end }}(
-			{{ range $_, $storage := $.Storage -}}
-				{{- with extend $ "Edge" $e -}}
-					{{ $tmpl := printf "dialect/%s/predicate/edge/haswith" $storage }}
-					{{- xtemplate $tmpl . }},
-				{{ end -}}
-			{{ end -}}
+		return predicate.{{ $.Name }}(
+			{{- with extend $ "Edge" $e -}}
+				{{ $tmpl := printf "dialect/%s/predicate/edge/haswith" $.Storage }}
+				{{- xtemplate $tmpl . }}
+			{{- end -}}
 		)
 	}
 {{ end }}
 
 // And groups list of predicates with the AND operator between them.
 func And(predicates ...predicate.{{ $.Name }}) predicate.{{ $.Name }} {
-	return predicate.{{ $.Name }}{{ if gt (len $.Storage) 1 }}PerDialect{{ end }}(
-		{{ range $_, $storage := $.Storage -}}
-			{{ $tmpl := printf "dialect/%s/predicate/and" $storage }}
-			{{- xtemplate $tmpl . }},
-		{{ end -}}
+	return predicate.{{ $.Name }}(
+		{{- $tmpl = printf "dialect/%s/predicate/and" $.Storage }}
+		{{- xtemplate $tmpl . -}}
 	)
 }
 
 // Or groups list of predicates with the OR operator between them.
 func Or(predicates ...predicate.{{ $.Name }}) predicate.{{ $.Name }} {
-	return predicate.{{ $.Name }}{{ if gt (len $.Storage) 1 }}PerDialect{{ end }}(
-		{{ range $_, $storage := $.Storage -}}
-			{{ $tmpl := printf "dialect/%s/predicate/or" $storage }}
-			{{- xtemplate $tmpl . }},
-		{{ end -}}
+	return predicate.{{ $.Name }}(
+		{{- $tmpl = printf "dialect/%s/predicate/or" $.Storage }}
+		{{- xtemplate $tmpl . -}}
 	)
 }
 
 // Not applies the not operator on the given predicate.
 func Not(p predicate.{{ $.Name }}) predicate.{{ $.Name }} {
-	return predicate.{{ $.Name }}{{ if gt (len $.Storage) 1 }}PerDialect{{ end }}(
-		{{ range $_, $storage := $.Storage -}}
-			{{ $tmpl := printf "dialect/%s/predicate/not" $storage }}
-			{{- xtemplate $tmpl . }},
-		{{ end -}}
+	return predicate.{{ $.Name }}(
+		{{- $tmpl = printf "dialect/%s/predicate/not" $.Storage }}
+		{{- xtemplate $tmpl . -}}
 	)
 }
 

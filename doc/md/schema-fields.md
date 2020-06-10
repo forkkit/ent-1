@@ -51,15 +51,17 @@ The following types are currently supported by the framework:
 - `string`
 - `time.Time`
 - `[]byte` (only supported by SQL dialects).
-- `JSON` (only supported by SQL dialects) - **experimental**.
+- `JSON` (only supported by SQL dialects).
 - `Enum` (only supported by SQL dialects).
 
 <br/>
+
 ```go
 package schema
 
 import (
 	"time"
+	"net/url"
 
 	"github.com/facebookincubator/ent"
 	"github.com/facebookincubator/ent/schema/field"
@@ -96,9 +98,123 @@ func (User) Fields() []ent.Field {
 
 To read more about how each type is mapped to its database-type, go to the [Migration](migrate.md) section.
 
+## ID Field
+
+The `id` field is builtin in the schema and does not need declaration. In SQL-based
+databases, its type defaults to `int` (but can be changed with a [codegen option](code-gen.md#code-generation-options))
+and auto-incremented in the database.
+
+In order to configure the `id` field to be unique across all tables, use the
+[WithGlobalUniqueID](migrate.md#universal-ids) option when running schema migration.
+
+If a different configuration for the `id` field is needed, or the `id` value should
+be provided on entity creation by the application (e.g. UUID), override the builtin
+`id` configuration. For example:
+
+```go
+// Fields of the Group.
+func (Group) Fields() []ent.Field {
+	return []ent.Field{
+		field.Int("id").
+			StructTag(`json:"oid,omitempty"`),
+	}
+}
+
+// Fields of the Blob.
+func (Blob) Fields() []ent.Field {
+	return []ent.Field{
+		field.UUID("id", uuid.UUID{}),
+	}
+}
+
+// Fields of the Pet.
+func (Pet) Fields() []ent.Field {
+	return []ent.Field{
+		field.String("id").
+			MaxLen(25).
+			NotEmpty().
+			Unique().
+			Immutable(),
+	}
+}
+```
+
+## Database Type
+
+Each database dialect has its own mapping from Go type to database type. For example,
+the MySQL dialect creates `float64` fields as `double` columns in the database. However,
+there is an option to override the default behavior using the `SchemaType` method.
+
+```go
+package schema
+
+import (
+    "github.com/facebookincubator/ent"
+    "github.com/facebookincubator/ent/dialect"
+    "github.com/facebookincubator/ent/schema/field"
+)
+
+// Card schema.
+type Card struct {
+    ent.Schema
+}
+
+// Fields of the Card.
+func (Card) Fields() []ent.Field {
+	return []ent.Field{
+		field.Float("amount").
+			SchemaType(map[string]string{
+				dialect.MySQL:    "decimal(6,2)",   // Override MySQL. 
+				dialect.Postgres: "numeric",        // Override Postgres.
+			}),
+	}
+}
+```
+
+## Go Type
+The default type for fields are the basic Go types. For example, for string fields, the type is `string`,
+and for time fields, the type is `time.Time`. The `GoType` method provides an option to override the
+default ent type with a custom one.
+
+The custom type must be either a type that is convertible to the Go basic type, or a type that implements the
+[ValueScanner](https://godoc.org/github.com/facebookincubator/ent/schema/field#ValueScanner) interface.
+
+
+```go
+package schema
+
+import (
+    "database/sql"
+
+    "github.com/facebookincubator/ent"
+    "github.com/facebookincubator/ent/dialect"
+    "github.com/facebookincubator/ent/schema/field"
+)
+
+// Amount is a custom Go type that's convertible to the basic float64 type.
+type Amount float64
+
+// Card schema.
+type Card struct {
+    ent.Schema
+}
+
+// Fields of the Card.
+func (Card) Fields() []ent.Field {
+	return []ent.Field{
+		field.Float("amount").
+			GoType(Amount(0)),
+		field.String("name").
+			Optional().
+			// A ValueScanner type.
+			GoType(&sql.NullString{}),
+	}
+}
+```
+
 ## Default Values
 
-**Non-unique** fields support default values using the `.Default` and `.UpdateDefault` methods.
+**Non-unique** fields support default values using the `Default` and `UpdateDefault` methods.
 
 ```go
 // Fields of the User.
@@ -162,6 +278,7 @@ The framework provides a few built-in validators for each type:
 - Numeric types:
   - `Positive()`
   - `Negative()`
+  - `NonNegative()`
   - `Min(i)` - Validate that the given value is > i.
   - `Max(i)` - Validate that the given value is < i.
   - `Range(i, j)` - Validate that the given value is within the range [i, j].
@@ -239,7 +356,7 @@ func (User) Fields() []ent.Field {
 	return []ent.Field{
 		field.String("name"),
 		field.Time("created_at").
-			Default(time.Now),
+			Default(time.Now).
 			Immutable(),
 	}
 }
@@ -262,7 +379,7 @@ func (User) Fields() []ent.Field {
 
 ## Storage Key
 
-Custom storage name can be configured using the `StorageKey` method.  
+Custom storage name can be configured using the `StorageKey` method.
 It's mapped to a column name in SQL dialects and to property name in Gremlin.
 
 ```go
@@ -297,7 +414,7 @@ func (User) Fields() []ent.Field {
 }
 ```
 
-## Struct Fields
+## Additional Struct Fields
 
 By default, `entc` generates the entity model with fields that are configured in the `schema.Fields` method.
 For example, given this schema configuration:
@@ -333,17 +450,15 @@ type User struct {
 ```
 
 In order to add additional fields to the generated struct **that are not stored in the database**,
-add them to the schema struct as follows:
+use [external templates](code-gen.md/#external-templates). For example:
 
-```go
-// User schema.
-type User struct {
-	ent.Schema
-	// Additional struct-only fields.
-	Tenant	string
-	Logger	*log.Logger
-}
-
+```gotemplate
+{{ define "model/fields/additional" }}
+	{{- if eq $.Name "User" }}
+		// StaticField defined by template.
+		StaticField string `json:"static,omitempty"`
+	{{- end }}
+{{ end }}
 ```
 
 The generated model will be as follows:
@@ -354,17 +469,16 @@ type User struct {
 	// Age holds the value of the "age" field.
 	Age  *int	`json:"age,omitempty"`
 	// Name holds the value of the "name" field.
-	Name string `json:"name,omitempty" gqlgen:"gql_name"` 
-	// additional struct fields defined in the schema.
-	Tenant	string
-	Logger	*log.Logger
+	Name string `json:"name,omitempty" gqlgen:"gql_name"`
+	// StaticField defined by template.
+	StaticField string `json:"static,omitempty"`
 }
 ```
 
 ## Sensitive Fields
 
 String fields can be defined as sensitive using the `Sensitive` method. Sensitive fields
-won't be printed and they will be omitted when encoding.  
+won't be printed and they will be omitted when encoding.
 
 Note that sensitive fields cannot have struct tags.
 

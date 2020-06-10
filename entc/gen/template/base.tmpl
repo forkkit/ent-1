@@ -11,47 +11,35 @@ in the LICENSE file in the root directory of this source tree.
 
 {{ template "import" $ }}
 
-// Order applies an ordering on either graph traversal or sql selector.
-type Order func({{ if gt (len $.Storage) 1 }}interface{}{{ else }}{{ (index $.Storage 0).Builder }}{{ end }})
+// ent aliases to avoid import conflict in user's code.
+type (
+	Op         = ent.Op
+	Hook       = ent.Hook
+	Value      = ent.Value
+	Query      = ent.Query
+	Policy     = ent.Policy
+	Mutator    = ent.Mutator
+	Mutation   = ent.Mutation
+	MutateFunc = ent.MutateFunc
+)
 
-{{ if gt (len $.Storage) 1 }}
-// OrderPerDialect construct the "order by" clause for graph traversals based on dialect type.
-func OrderPerDialect({{ range $i, $storage := $.Storage }}{{ if $i }},{{ end }}f{{ $i }} func({{ $storage.Builder }}){{ end }}) Order {
-	return Order(func (v interface{}) {
-		switch v := v.(type) {
-		{{- range $i, $storage := $.Storage }}
-		case {{ $storage.Builder }}:
-			f{{ $i }}(v)
-		{{- end }}
-		default:
-			panic(fmt.Sprintf("unknown type for order: %T", v))
-		}
-	})
-}
-{{ end }}
+// OrderFunc applies an ordering on either graph traversal or sql selector.
+type OrderFunc func({{ $.Storage.Builder }})
 
 {{ range $f, $order := order }}
 	{{ $f = pascal $f }}
 	// {{ $f }} applies the given fields in {{ upper $f }} order.
-	func {{ $f }}(fields ...string) Order {
-		return Order{{ if gt (len $.Storage) 1 }}PerDialect{{ end }}(
-			{{ range $_, $storage := $.Storage -}}
-				{{- with extend (index $.Nodes 0) "Func" $f "Order" $order -}}
-					{{ $tmpl := printf "dialect/%s/order" $storage }}
-					{{- xtemplate $tmpl . }},
-				{{ end -}}
-			{{ end -}}
-		)
+	func {{ $f }}(fields ...string) OrderFunc {
+		{{- with extend (index $.Nodes 0) "Func" $f "Order" $order -}}
+			{{ $tmpl := printf "dialect/%s/order" $.Storage }}
+			return {{ xtemplate $tmpl . }}
+		{{ end -}}
 	}
 {{ end }}
 
-// Aggregate applies an aggregation step on the group-by traversal/selector.
-type Aggregate struct {
-	{{ range $_, $storage := $.Storage -}}
-		{{ $tmpl := printf "dialect/%s/group/signature" $storage }}
-		{{- xtemplate $tmpl . }}
-	{{ end -}}
-}
+{{ $tmpl := printf "dialect/%s/group/signature" $.Storage }}
+// AggregateFunc applies an aggregation step on the group-by traversal/selector.
+{{ xtemplate $tmpl . }}
 
 
 // As is a pseudo aggregation function for renaming another other functions with custom names. For example:
@@ -60,53 +48,46 @@ type Aggregate struct {
 //	Aggregate({{ $pkg }}.As({{ $pkg }}.Sum(field1), "sum_field1"), ({{ $pkg }}.As({{ $pkg }}.Sum(field2), "sum_field2")).
 //	Scan(ctx, &v)
 //
-func As(fn Aggregate, end string) Aggregate {
-	return Aggregate{
-		{{ range $_, $storage := $.Storage -}}
-			{{ $tmpl := printf "dialect/%s/group/as" $storage }}
-			{{- $storage.IdentName }}: {{ xtemplate $tmpl . }},
-		{{ end -}}
-	}
+func As(fn AggregateFunc, end string) AggregateFunc {
+	{{- $tmpl = printf "dialect/%s/group/as" $.Storage }}
+	return {{ xtemplate $tmpl . }}
 }
 
 {{ range $name, $withField := aggregate }}
 	{{ $fn := pascal $name }}
-	{{ range $_, $storage := $.Storage -}}
-		{{ $tmpl := printf "dialect/%s/group/const" $storage }}
-		{{ if hasTemplate $tmpl }}
-			{{ with extend (index $.Nodes 0) "Name" $name "Func" $fn -}}
-				{{ xtemplate $tmpl . }}
-			{{ end }}
+	{{ $tmpl := printf "dialect/%s/group/const" $.Storage }}
+	{{ if hasTemplate $tmpl }}
+		{{ with extend (index $.Nodes 0) "Name" $name "Func" $fn -}}
+			{{ xtemplate $tmpl . }}
 		{{ end }}
 	{{ end }}
 
 	// {{ $fn }} applies the {{ quote $name }} aggregation function on {{ if $withField }}the given field of {{ end }}each group.
-	func {{ $fn }}({{ if $withField }}field string{{ end }}) Aggregate {
-		return Aggregate {
-			{{ range $_, $storage := $.Storage -}}
-				{{- with extend (index $.Nodes 0) "Func" $fn "WithField" $withField -}}
-					{{ $tmpl := printf "dialect/%s/group/func" $storage }}
-					{{- $storage.IdentName }}: {{ xtemplate $tmpl . }},
-				{{ end -}}
-			{{ end -}}
-		}
+	func {{ $fn }}({{ if $withField }}field string{{ end }}) AggregateFunc {
+		{{- with extend (index $.Nodes 0) "Func" $fn "WithField" $withField -}}
+			{{ $tmpl := printf "dialect/%s/group/func" $.Storage }}
+			return {{ xtemplate $tmpl . }}
+		{{ end -}}
 	}
 {{ end }}
 
-// ErrNotFound returns when trying to fetch a specific entity and it was not found in the database.
-type ErrNotFound struct {
+// NotFoundError returns when trying to fetch a specific entity and it was not found in the database.
+type NotFoundError struct {
 	label string
 }
 
 // Error implements the error interface.
-func (e *ErrNotFound) Error() string {
-	return fmt.Sprintf("{{ $pkg }}: %s not found", e.label)
+func (e *NotFoundError) Error() string {
+	return "{{ $pkg }}: " + e.label + " not found"
 }
 
 // IsNotFound returns a boolean indicating whether the error is a not found error.
 func IsNotFound(err error) bool {
-	_, ok := err.(*ErrNotFound)
-	return ok
+	if err == nil {
+		return false
+	}
+	var e *NotFoundError
+	return errors.As(err, &e)
 }
 
 // MaskNotFound masks nor found error.
@@ -117,60 +98,80 @@ func MaskNotFound(err error) error {
 	return err
 }
 
-// ErrNotSingular returns when trying to fetch a singular entity and more then one was found in the database.
-type ErrNotSingular struct {
+// NotSingularError returns when trying to fetch a singular entity and more then one was found in the database.
+type NotSingularError struct {
 	label string
 }
 
 // Error implements the error interface.
-func (e *ErrNotSingular) Error() string {
-	return fmt.Sprintf("{{ $pkg }}: %s not singular", e.label)
+func (e *NotSingularError) Error() string {
+	return "{{ $pkg }}: " + e.label + " not singular"
 }
 
 // IsNotSingular returns a boolean indicating whether the error is a not singular error.
 func IsNotSingular(err error) bool {
-	_, ok := err.(*ErrNotSingular)
-	return ok
+	if err == nil {
+		return false
+	}
+	var e *NotSingularError
+	return errors.As(err, &e)
 }
 
+// NotLoadedError returns when trying to get a node that was not loaded by the query.
+type NotLoadedError struct {
+	edge string
+}
 
-// ErrConstraintFailed returns when trying to create/update one or more entities and
-// one or more of their constraints failed. For example, violation of edge or field uniqueness.
-type ErrConstraintFailed struct {
+// Error implements the error interface.
+func (e *NotLoadedError) Error() string {
+	return "{{ $pkg }}: " + e.edge + " edge was not loaded"
+}
+
+// IsNotLoaded returns a boolean indicating whether the error is a not loaded error.
+func IsNotLoaded(err error) bool {
+	if err == nil {
+		return false
+	}
+	var e *NotLoadedError
+	return errors.As(err, &e)
+}
+
+// ConstraintError returns when trying to create/update one or more entities and
+// one or more of their constraints failed. For example, violation of edge or
+// field uniqueness.
+type ConstraintError struct {
 	msg string
 	wrap error
 }
 
 // Error implements the error interface.
-func (e ErrConstraintFailed) Error() string {
-	return fmt.Sprintf("{{ $pkg }}: unique constraint failed: %s", e.msg)
+func (e ConstraintError) Error() string {
+	return "{{ $pkg }}: constraint failed: " + e.msg
 }
 
 // Unwrap implements the errors.Wrapper interface.
-func (e *ErrConstraintFailed) Unwrap() error {
+func (e *ConstraintError) Unwrap() error {
 	return e.wrap
 }
 
-// IsConstraintFailure returns a boolean indicating whether the error is a constraint failure.
-func IsConstraintFailure(err error) bool {
-	_, ok := err.(*ErrConstraintFailed)
-	return ok
-}
-
-{{ range $_, $storage := $.Storage -}}
-	{{ $tmpl := printf "dialect/%s/errors" $storage }}
-	{{ if hasTemplate $tmpl }}
-		{{ xtemplate $tmpl $ }}
-	{{ end }}
-{{ end -}}
-
-{{ $id := (index $.Nodes 0).ID.Type }}
-// keys returns the keys/ids from the edge map.
-func keys(m map[{{ $id }}]struct{}) []{{ $id }} {
-	s := make([]{{ $id }}, 0, len(m))
-	for id := range m {
-		s = append(s, id)
+// IsConstraintError returns a boolean indicating whether the error is a constraint failure.
+func IsConstraintError(err error) bool {
+	if err == nil {
+		return false
 	}
-	return s
+	var e *ConstraintError
+	return errors.As(err, &e)
 }
+
+{{/* expand error types and global helpers. */}}
+{{ $tmpl = printf "dialect/%s/errors" $.Storage }}
+{{ if hasTemplate $tmpl }}
+	{{ xtemplate $tmpl $ }}
+{{ end }}
+
+{{ $tmpl = printf "dialect/%s/globals" $.Storage }}
+{{ if hasTemplate $tmpl }}
+	{{ xtemplate $tmpl $ }}
+{{ end }}
+
 {{ end }}

@@ -6,6 +6,7 @@ package template
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/facebookincubator/ent/entc/integration/template/ent"
@@ -42,4 +43,7 @@ func TestCustomTemplate(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, g.ID, node.ID)
 	require.Equal(t, &ent.Field{Type: "int", Name: "MaxUsers", Value: "10"}, node.Fields[0])
+
+	// check for client additional fields.
+	require.True(t, reflect.ValueOf(client).Elem().FieldByName("tables").IsValid())
 }

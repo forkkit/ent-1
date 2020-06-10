@@ -6,6 +6,7 @@ package schema
 
 import (
 	"github.com/facebookincubator/ent"
+	"github.com/facebookincubator/ent/schema/edge"
 	"github.com/facebookincubator/ent/schema/field"
 	"github.com/facebookincubator/ent/schema/index"
 )
@@ -18,9 +19,15 @@ type User struct {
 // Fields of the User.
 func (User) Fields() []ent.Field {
 	return []ent.Field{
+		field.Int("id").
+			StorageKey("oid"),
 		field.Int32("age"),
-		field.String("name").MaxLen(10),
-		field.String("address").Optional(),
+		field.String("name").
+			MaxLen(10),
+		field.String("nickname").
+			Unique(),
+		field.String("address").
+			Optional(),
 		field.String("renamed").
 			Optional(),
 		field.Bytes("blob").
@@ -32,9 +39,33 @@ func (User) Fields() []ent.Field {
 	}
 }
 
+func (User) Edges() []ent.Edge {
+	return []ent.Edge{
+		edge.To("children", User.Type).
+			From("parent").
+			Unique(),
+		edge.To("spouse", User.Type).
+			Unique(),
+		edge.To("car", Car.Type).
+			Unique(),
+	}
+}
+
 func (User) Indexes() []ent.Index {
 	return []ent.Index{
 		index.Fields("name", "address").
+			Unique(),
+	}
+}
+
+type Car struct {
+	ent.Schema
+}
+
+func (Car) Edges() []ent.Edge {
+	return []ent.Edge{
+		edge.From("owner", User.Type).
+			Ref("car").
 			Unique(),
 	}
 }

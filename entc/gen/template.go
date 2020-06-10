@@ -16,7 +16,7 @@ import (
 	"github.com/facebookincubator/ent/entc/gen/internal"
 )
 
-//go:generate go run github.com/go-bindata/go-bindata/go-bindata -o=internal/bindata.go -pkg=internal ./template/...
+//go:generate go run github.com/go-bindata/go-bindata/go-bindata -o=internal/bindata.go -pkg=internal -modtime=1 ./template/...
 
 type (
 	// TypeTemplate specifies a template that is executed with
@@ -29,8 +29,8 @@ type (
 	// the Graph object.
 	GraphTemplate struct {
 		Name   string            // template name.
-		Format string            // file name format.
 		Skip   func(*Graph) bool // skip condition.
+		Format string            // file name format.
 	}
 )
 
@@ -91,22 +91,42 @@ var (
 			Format: "config.go",
 		},
 		{
+			Name:   "mutation",
+			Format: "mutation.go",
+		},
+		{
 			Name:   "migrate",
 			Format: "migrate/migrate.go",
-			Skip:   func(g *Graph) bool { return !g.migrateSupport() },
+			Skip:   func(g *Graph) bool { return !g.SupportMigrate() },
 		},
 		{
 			Name:   "schema",
 			Format: "migrate/schema.go",
-			Skip:   func(g *Graph) bool { return !g.migrateSupport() },
+			Skip:   func(g *Graph) bool { return !g.SupportMigrate() },
 		},
 		{
 			Name:   "predicate",
 			Format: "predicate/predicate.go",
 		},
 		{
-			Name:   "example",
-			Format: "example_test.go",
+			Name:   "hook",
+			Format: "hook/hook.go",
+		},
+		{
+			Name:   "privacy",
+			Format: "privacy/privacy.go",
+		},
+		{
+			Name:   "runtime/ent",
+			Format: "runtime.go",
+		},
+		{
+			Name:   "enttest",
+			Format: "enttest/enttest.go",
+		},
+		{
+			Name:   "runtime/pkg",
+			Format: "runtime/runtime.go",
 		},
 	}
 	// templates holds the Go templates for the code generation.

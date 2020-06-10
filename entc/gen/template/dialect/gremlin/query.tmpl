@@ -8,23 +8,6 @@ in the LICENSE file in the root directory of this source tree.
 {{ $builder := pascal $.Scope.Builder }}
 {{ $receiver := receiver $builder }}
 
-func ({{ $receiver }} *{{ $builder }}) gremlinIDs(ctx context.Context) ([]{{ $.ID.Type }}, error) {
-	res := &gremlin.Response{}
-	query, bindings := {{ $receiver }}.gremlinQuery().Query()
-	if err := {{ $receiver }}.driver.Exec(ctx, query, bindings, res); err != nil {
-		return nil, err
-	}
-	vertices, err := res.ReadVertices()
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]{{ $.ID.Type }}, 0, len(vertices))
-	for _, vertex := range vertices {
-		ids = append(ids, vertex.ID.({{ $.ID.Type }}))
-	}
-	return ids, nil
-}
-
 func ({{ $receiver }} *{{ $builder }}) gremlinAll(ctx context.Context) ([]*{{ $.Name }}, error) {
 	res := &gremlin.Response{}
 	query, bindings := {{ $receiver }}.gremlinQuery().ValueMap(true).Query()
@@ -90,13 +73,14 @@ func ({{ $receiver }} *{{ $builder }}) gremlinQuery() *dsl.Traversal {
 {{ define "dialect/gremlin/query/path" }}
 	{{- $e := $.Scope.Edge }} {{/* the edge we need to genegrate the path to. */}}
 	{{- $receiver := $.Scope.Receiver }}
+	{{- $ident := $.Scope.Ident }}
 	gremlin := {{ $receiver }}.gremlinQuery()
-	{{- if $e.SelfRef }}
-		query.gremlin = gremlin.Both({{ $.Package }}.{{ $e.Constant }})
+	{{- if $e.Bidi }}
+		{{ $ident }} = gremlin.Both({{ $.Package }}.{{ $e.LabelConstant }})
 	{{- else if $e.IsInverse }}
-		query.gremlin = gremlin.InE({{ $e.Type.Package }}.{{ $e.Constant }}).OutV()
+		{{ $ident }} = gremlin.InE({{ $e.Type.Package }}.{{ $e.LabelConstant }}).OutV()
 	{{- else }}
-		query.gremlin = gremlin.OutE({{ $.Package }}.{{ $e.Constant }}).InV()
+		{{ $ident }} = gremlin.OutE({{ $.Package }}.{{ $e.LabelConstant }}).InV()
 	{{- end }}
 {{ end }}
 
@@ -106,12 +90,13 @@ func ({{ $receiver }} *{{ $builder }}) gremlinQuery() *dsl.Traversal {
 	{{- $n := $ }} {{/* the node we start the query from. */}}
 	{{- $e := $.Scope.Edge }} {{/* the edge we need to genegrate the path to. */}}
 	{{- $receiver := $.Scope.Receiver }}
+	{{- $ident := $.Scope.Ident -}}
 
-	{{- if $e.SelfRef }}
-		query.gremlin = g.V({{ $receiver }}.ID).Both({{ $n.Package }}.{{ $e.Constant }})
+	{{- if $e.Bidi }}
+		{{ $ident }} = g.V({{ $receiver }}.ID).Both({{ $n.Package }}.{{ $e.LabelConstant }})
 	{{- else if $e.IsInverse }}
-		query.gremlin = g.V({{ $receiver }}.ID).InE({{ $e.Type.Package }}.{{ $e.Constant }}).OutV()
+		{{ $ident }} = g.V({{ $receiver }}.ID).InE({{ $e.Type.Package }}.{{ $e.LabelConstant }}).OutV()
 	{{- else }}
-		query.gremlin = g.V({{ $receiver }}.ID).OutE({{ $n.Package }}.{{ $e.Constant }}).InV()
+		{{ $ident }} = g.V({{ $receiver }}.ID).OutE({{ $n.Package }}.{{ $e.LabelConstant }}).InV()
 	{{- end }}
 {{ end }}

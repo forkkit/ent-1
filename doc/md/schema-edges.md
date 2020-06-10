@@ -53,19 +53,19 @@ import (
 	"github.com/facebookincubator/ent/schema/edge"
 )
 
-// User schema.
+// Pet holds the schema definition for the Pet entity.
 type Pet struct {
 	ent.Schema
 }
 
-// Fields of the user.
+// Fields of the Pet.
 func (Pet) Fields() []ent.Field {
 	return []ent.Field{
 		// ...
 	}
 }
 
-// Edges of the user.
+// Edges of the Pet.
 func (Pet) Edges() []ent.Edge {
 	return []ent.Edge{
 		edge.From("owner", User.Type).
@@ -198,7 +198,7 @@ func (User) Edges() []ent.Edge {
 
 `ent/schema/card.go`
 ```go
-// Edges of the user.
+// Edges of the Card.
 func (Card) Edges() []ent.Edge {
 	return []ent.Edge{
 		edge.From("owner", User.Type).
@@ -348,7 +348,7 @@ func Do(ctx context.Context, client *ent.Client) error {
 }
 ```
 
-The full example exists in [GitHub](https://github.com/facebookincubator/ent/tree/master/examples/o2o2recur).
+The full example exists in [GitHub](https://github.com/facebookincubator/ent/tree/master/examples/o2orecur).
 
 ## O2O Bidirectional
 
@@ -868,7 +868,7 @@ The full example exists in [GitHub](https://github.com/facebookincubator/ent/tre
 Edges can be defined as required in the entity creation using the `Required` method on the builder.
 
 ```go
-// Edges of the user.
+// Edges of the Card.
 func (Card) Edges() []ent.Edge {
 	return []ent.Edge{
 		edge.From("owner", User.Type).

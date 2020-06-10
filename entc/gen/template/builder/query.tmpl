@@ -11,22 +11,38 @@ in the LICENSE file in the root directory of this source tree.
 
 {{ template "import" $ }}
 
-{{ $builder := print (pascal $.Name) "Query" }}
+import (
+	{{- range $path := $.SiblingImports }}
+		"{{ $path }}"
+	{{- end }}
+)
+
+
+{{ $builder := $.QueryName }}
 {{ $receiver := receiver $builder }}
-{{ $multistorage := gt (len $.Storage) 1 }}
 
 // {{ $builder }} is the builder for querying {{ pascal $.Name }} entities.
 type {{ $builder }} struct {
 	config
 	limit		*int
 	offset		*int
-	order		[]Order
+	order		[]OrderFunc
 	unique		[]string
 	predicates 	[]predicate.{{ $.Name }}
-	// intermediate queries.
-	{{- range $_, $storage := $.Storage }}
-		{{ $storage }} {{ $storage.Builder}}
+	{{- with $.Edges }}
+		// eager-loading edges.
+		{{- range $e := . }}
+			with{{ pascal $e.Name }} *{{ $e.Type.QueryName }}
+		{{- end }}
 	{{- end }}
+	{{- /* Additional fields to add to the builder. */}}
+	{{- $tmpl := printf "dialect/%s/query/fields" $.Storage }}
+	{{- if hasTemplate $tmpl }}
+		{{- xtemplate $tmpl . }}
+	{{- end }}
+	// intermediate query (i.e. traversal path).
+	{{ $.Storage }} {{ $.Storage.Builder }}
+	path func(context.Context) ({{ $.Storage.Builder }}, error)
 }
 
 // Where adds a new predicate for the builder.
@@ -48,7 +64,7 @@ func ({{ $receiver }} *{{ $builder }}) Offset(offset int) *{{ $builder }} {
 }
 
 // Order adds an order step to the query.
-func ({{ $receiver }} *{{ $builder }}) Order(o ...Order) *{{ $builder }} {
+func ({{ $receiver }} *{{ $builder }}) Order(o ...OrderFunc) *{{ $builder }} {
 	{{ $receiver }}.order = append({{ $receiver }}.order, o...)
 	return {{ $receiver }}
 }
@@ -59,34 +75,28 @@ func ({{ $receiver }} *{{ $builder }}) Order(o ...Order) *{{ $builder }} {
 	// Query{{ pascal $e.Name }} chains the current query on the {{ $e.Name }} edge.
 	func ({{ $receiver }} *{{ $builder }}) Query{{ pascal $e.Name }}() *{{ $edge_builder }} {
 		query := &{{ $edge_builder }}{config: {{ $receiver }}.config}
-		{{- if $multistorage }}
-			switch {{ $receiver }}.driver.Dialect() {
-			{{- range $_, $storage := $.Storage -}}
-			case {{ join $storage.Dialects ", " }}:
-				{{- with extend $ "Receiver" $receiver "Edge" $e -}}
-					{{ $tmpl := printf "dialect/%s/query/path" $storage }}
-					{{- xtemplate $tmpl . -}}
-				{{ end -}}
-			{{ end -}}
+		query.path = func(ctx context.Context) (fromU {{ $.Storage.Builder }}, err error) {
+			if err := {{ $receiver }}.prepareQuery(ctx); err != nil {
+				return nil, err
 			}
-		{{ else }}
-			{{- with extend $ "Receiver" $receiver "Edge" $e -}}
-				{{ $tmpl := printf "dialect/%s/query/path" (index $.Storage 0) }}
+			{{- with extend $ "Receiver" $receiver "Edge" $e "Ident" "fromU" -}}
+				{{ $tmpl := printf "dialect/%s/query/path" $.Storage }}
 				{{- xtemplate $tmpl . }}
 			{{- end -}}
-		{{- end -}}
+			return fromU, nil
+		}
 		return query
 	}
 {{ end }}
 
-// First returns the first {{ $.Name }} entity in the query. Returns *ErrNotFound when no {{ lower $.Name }} was found.
+// First returns the first {{ $.Name }} entity in the query. Returns *NotFoundError when no {{ lower $.Name }} was found.
 func ({{ $receiver }} *{{ $builder }}) First(ctx context.Context) (*{{ $.Name }}, error) {
 	{{ plural $.Receiver }}, err := {{ $receiver }}.Limit(1).All(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if len({{ plural $.Receiver }}) == 0 {
-		return nil, &ErrNotFound{ {{ $.Package }}.Label}
+		return nil, &NotFoundError{ {{ $.Package }}.Label}
 	}
 	return {{ plural $.Receiver }}[0], nil
 }
@@ -100,14 +110,14 @@ func ({{ $receiver }} *{{ $builder }}) FirstX(ctx context.Context) *{{ $.Name }}
 	return {{ $.Receiver }}
 }
 
-// FirstID returns the first {{ $.Name }} id in the query. Returns *ErrNotFound when no id was found.
+// FirstID returns the first {{ $.Name }} id in the query. Returns *NotFoundError when no id was found.
 func ({{ $receiver }} *{{ $builder }}) FirstID(ctx context.Context) (id {{ $.ID.Type }}, err error) {
 	var ids []{{ $.ID.Type }}
 	if ids, err = {{ $receiver }}.Limit(1).IDs(ctx); err != nil {
 		return
 	}
 	if len(ids) == 0 {
-		err = &ErrNotFound{ {{ $.Package }}.Label}
+		err = &NotFoundError{ {{ $.Package }}.Label}
 		return
 	}
 	return ids[0], nil
@@ -132,9 +142,9 @@ func ({{ $receiver }} *{{ $builder }}) Only(ctx context.Context) (*{{ $.Name }},
 	case 1:
 		return {{ plural $.Receiver }}[0], nil
 	case 0:
-		return nil, &ErrNotFound{ {{ $.Package }}.Label}
+		return nil, &NotFoundError{ {{ $.Package }}.Label}
 	default:
-		return nil, &ErrNotSingular{ {{ $.Package }}.Label}
+		return nil, &NotSingularError{ {{ $.Package }}.Label}
 	}
 }
 
@@ -157,9 +167,9 @@ func ({{ $receiver }} *{{ $builder }}) OnlyID(ctx context.Context) (id {{ $.ID.T
 	case 1:
 		id = ids[0]
 	case 0:
-		err = &ErrNotFound{ {{ $.Package }}.Label}
+		err = &NotFoundError{ {{ $.Package }}.Label}
 	default:
-		err = &ErrNotSingular{ {{ $.Package }}.Label}
+		err = &NotSingularError{ {{ $.Package }}.Label}
 	}
 	return
 }
@@ -175,18 +185,10 @@ func ({{ $receiver }} *{{ $builder }}) OnlyXID(ctx context.Context) {{ $.ID.Type
 
 // All executes the query and returns a list of {{ plural $.Name }}.
 func ({{ $receiver }} *{{ $builder }}) All(ctx context.Context) ([]*{{ $.Name }}, error) {
-	{{- if $multistorage }}
-		switch {{ $receiver }}.driver.Dialect() {
-		{{- range $_, $storage := $.Storage }}
-		case {{ join $storage.Dialects ", " }}:
-			return {{ $receiver }}.{{ $storage }}All(ctx)
-		{{- end }}
-		default:
-			return nil, errors.New("{{ $pkg }}: unsupported dialect")
-		}
-	{{- else }}
-		return {{ $receiver }}.{{ index $.Storage 0 }}All(ctx)
-	{{- end }}
+	if err := {{ $receiver }}.prepareQuery(ctx); err != nil {
+		return nil, err
+	}
+	return {{ $receiver }}.{{ $.Storage }}All(ctx)
 }
 
 // AllX is like All, but panics if an error occurs.
@@ -200,18 +202,11 @@ func ({{ $receiver }} *{{ $builder }}) AllX(ctx context.Context) []*{{ $.Name }}
 
 // IDs executes the query and returns a list of {{ $.Name }} ids.
 func ({{ $receiver }} *{{ $builder }}) IDs(ctx context.Context) ([]{{ $.ID.Type }}, error) {
-	{{- if $multistorage }}
-		switch {{ $receiver }}.driver.Dialect() {
-		{{- range $_, $storage := $.Storage }}
-		case {{ join $storage.Dialects ", " }}:
-			return {{ $receiver }}.{{ $storage }}IDs(ctx)
-		{{- end }}
-		default:
-			return nil, errors.New("{{ $pkg }}: unsupported dialect")
-		}
-	{{- else }}
-		return {{ $receiver }}.{{ index $.Storage 0 }}IDs(ctx)
-	{{- end }}
+	var ids []{{ $.ID.Type }}
+	if err := {{ $receiver }}.Select({{ $.Package }}.FieldID).Scan(ctx, &ids); err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 // IDsX is like IDs, but panics if an error occurs.
@@ -225,18 +220,10 @@ func ({{ $receiver }} *{{ $builder }}) IDsX(ctx context.Context) []{{ $.ID.Type 
 
 // Count returns the count of the given query.
 func ({{ $receiver }} *{{ $builder }}) Count(ctx context.Context) (int, error) {
-	{{- if $multistorage }}
-		switch {{ $receiver }}.driver.Dialect() {
-		{{- range $_, $storage := $.Storage }}
-		case {{ join $storage.Dialects ", " }}:
-			return {{ $receiver }}.{{ $storage }}Count(ctx)
-		{{- end }}
-		default:
-			return 0, errors.New("{{ $pkg }}: unsupported dialect")
-		}
-	{{- else }}
-		return {{ $receiver }}.{{ index $.Storage 0 }}Count(ctx)
-	{{- end }}
+	if err := {{ $receiver }}.prepareQuery(ctx); err != nil {
+		return 0, err
+	}
+	return {{ $receiver }}.{{ $.Storage }}Count(ctx)
 }
 
 // CountX is like Count, but panics if an error occurs.
@@ -250,18 +237,10 @@ func ({{ $receiver }} *{{ $builder }}) CountX(ctx context.Context) int {
 
 // Exist returns true if the query has elements in the graph.
 func ({{ $receiver }} *{{ $builder }}) Exist(ctx context.Context) (bool, error) {
-	{{- if $multistorage }}
-		switch {{ $receiver }}.driver.Dialect() {
-		{{- range $_, $storage := $.Storage }}
-		case {{ join $storage.Dialects ", " }}:
-			return {{ $receiver }}.{{ $storage }}Exist(ctx)
-		{{- end }}
-		default:
-			return false, errors.New("{{ $pkg }}: unsupported dialect")
-		}
-	{{- else }}
-		return {{ $receiver }}.{{ index $.Storage 0 }}Exist(ctx)
-	{{- end }}
+	if err := {{ $receiver }}.prepareQuery(ctx); err != nil {
+		return false, err
+	}
+	return {{ $receiver }}.{{ $.Storage }}Exist(ctx)
 }
 
 // ExistX is like Exist, but panics if an error occurs.
@@ -280,15 +259,28 @@ func ({{ $receiver }} *{{ $builder }}) Clone() *{{ $builder }} {
 		config: 	{{ $receiver }}.config,
 		limit: 		{{ $receiver }}.limit,
 		offset: 	{{ $receiver }}.offset,
-		order: 		append([]Order{}, {{ $receiver }}.order...),
+		order: 		append([]OrderFunc{}, {{ $receiver }}.order...),
 		unique: 	append([]string{}, {{ $receiver }}.unique...),
 		predicates: append([]predicate.{{ $.Name }}{}, {{ $receiver }}.predicates...),
-		// clone intermediate queries.
-		{{- range $_, $storage := $.Storage }}
-			{{ $storage }}: {{ $receiver }}.{{ $storage }}.Clone(),
-		{{- end }}
+		// clone intermediate query.
+		{{ $.Storage }}: {{ $receiver }}.{{ $.Storage }}.Clone(),
+		path: {{ $receiver }}.path,
 	}
 }
+
+{{- range $e := $.Edges }}
+	{{ $ebuilder := $e.Type.QueryName }}
+	//  With{{ pascal $e.Name }} tells the query-builder to eager-loads the nodes that are connected to
+	// the "{{ $e.Name }}" edge. The optional arguments used to configure the query builder of the edge.
+	func ({{ $receiver }} *{{ $builder }}) With{{ pascal $e.Name }}(opts ...func(*{{ $ebuilder }})) *{{ $builder }} {
+		query := &{{ $ebuilder }}{config: {{ $receiver }}.config}
+		for _, opt := range opts {
+			opt(query)
+		}
+		{{ $receiver }}.with{{ pascal $e.Name }} = query
+		return {{ $receiver }}
+	}
+{{- end }}
 
 {{ $groupBuilder := pascal $.Name | printf "%sGroupBy" }}
 
@@ -300,7 +292,7 @@ func ({{ $receiver }} *{{ $builder }}) Clone() *{{ $builder }} {
 // Example:
 //
 //	var v []struct {
-//		{{ pascal $f.Name }} {{ $f.Type }} `{{ $f.StructTag }}`
+//		{{ $f.StructField }} {{ $f.Type }} `{{ $f.StructTag }}`
 //		Count int `json:"count,omitempty"`
 //	}
 //
@@ -313,16 +305,12 @@ func ({{ $receiver }} *{{ $builder }}) Clone() *{{ $builder }} {
 func ({{ $receiver }} *{{ $builder }}) GroupBy(field string, fields ...string) *{{ $groupBuilder }} {
 	group := &{{ $groupBuilder }}{config: {{ $receiver }}.config}
 	group.fields = append([]string{field}, fields...)
-	{{- if $multistorage }}
-		switch {{ $receiver }}.driver.Dialect() {
-		{{- range $_, $storage := $.Storage }}
-		case {{ join $storage.Dialects ", " }}:
-			group.{{ $storage }} = {{ $receiver }}.{{ $storage }}Query()
-		{{- end }}
+	group.path = func(ctx context.Context) (prev {{ $.Storage.Builder }}, err error) {
+		if err := {{ $receiver }}.prepareQuery(ctx); err != nil {
+			return nil, err
 		}
-	{{- else }}
-		group.{{ index $.Storage 0 }} = {{ $receiver }}.{{ index $.Storage 0 }}Query()
-	{{- end }}
+		return {{ $receiver }}.{{ $.Storage }}Query(), nil
+	}
 	return group
 }
 
@@ -335,7 +323,7 @@ func ({{ $receiver }} *{{ $builder }}) GroupBy(field string, fields ...string) *
 // Example:
 //
 //	var v []struct {
-//		{{ pascal $f.Name }} {{ $f.Type }} `{{ $f.StructTag }}`
+//		{{ $f.StructField }} {{ $f.Type }} `{{ $f.StructTag }}`
 //	}
 //
 //	client.{{ pascal $.Name }}.Query().
@@ -346,24 +334,34 @@ func ({{ $receiver }} *{{ $builder }}) GroupBy(field string, fields ...string) *
 func ({{ $receiver }} *{{ $builder }}) Select(field string, fields ...string) *{{ $selectBuilder }} {
 	selector := &{{ $selectBuilder }}{config: {{ $receiver }}.config}
 	selector.fields = append([]string{field}, fields...)
-	{{- if $multistorage }}
-		switch {{ $receiver }}.driver.Dialect() {
-		{{- range $_, $storage := $.Storage }}
-		case {{ join $storage.Dialects ", " }}:
-			selector.{{ $storage }} = {{ $receiver }}.{{ $storage }}Query()
-		{{- end }}
+	selector.path = func(ctx context.Context) (prev {{ $.Storage.Builder }}, err error) {
+		if err := {{ $receiver }}.prepareQuery(ctx); err != nil {
+			return nil, err
 		}
-	{{- else }}
-		selector.{{ index $.Storage 0 }} = {{ $receiver }}.{{ index $.Storage 0 }}Query()
-	{{- end }}
+		return {{ $receiver }}.{{ $.Storage }}Query(), nil
+	}
 	return selector
 }
 
-{{- range $_, $storage := $.Storage }}
-	{{ with extend $ "Builder" $builder "Package" $pkg }}
-		{{ $tmpl := printf "dialect/%s/query" $storage }}
-		{{ xtemplate $tmpl . }}
-	{{ end }}
+func ({{ $receiver }} *{{ $builder }}) prepareQuery(ctx context.Context) error {
+	if {{ $receiver }}.path != nil {
+		prev, err := {{ $receiver }}.path(ctx)
+		if err != nil {
+			return err
+		}
+		{{ $receiver }}.{{ $.Storage }} = prev
+	}
+	{{- if $.HasPolicy }}
+		if err := {{ $.Package }}.Policy.EvalQuery(ctx, {{ $receiver }}); err != nil {
+			return err
+		}
+	{{- end }}
+	return nil
+}
+
+{{ with extend $ "Builder" $builder "Package" $pkg }}
+	{{ $tmpl := printf "dialect/%s/query" $.Storage }}
+	{{ xtemplate $tmpl . }}
 {{ end }}
 
 {{/* groupby builder */}}
@@ -374,33 +372,26 @@ func ({{ $receiver }} *{{ $builder }}) Select(field string, fields ...string) *{
 type {{ $groupBuilder }} struct {
 	config
 	fields []string
-	fns    []Aggregate
-	// intermediate queries.
-	{{- range $_, $storage := $.Storage }}
-		{{ $storage }} {{ $storage.Builder}}
-	{{- end }}
+	fns    []AggregateFunc
+	// intermediate query (i.e. traversal path).
+	{{ $.Storage }} {{ $.Storage.Builder }}
+	path func(context.Context) ({{ $.Storage.Builder }}, error)
 }
 
 // Aggregate adds the given aggregation functions to the group-by query.
-func ({{ $groupReceiver }} *{{ $groupBuilder }}) Aggregate(fns ...Aggregate) *{{ $groupBuilder }} {
+func ({{ $groupReceiver }} *{{ $groupBuilder }}) Aggregate(fns ...AggregateFunc) *{{ $groupBuilder }} {
 	{{ $groupReceiver }}.fns = append({{ $groupReceiver }}.fns, fns...)
 	return {{ $groupReceiver }}
 }
 
 // Scan applies the group-by query and scan the result into the given value.
 func ({{ $groupReceiver }} *{{ $groupBuilder }}) Scan(ctx context.Context, v interface{}) error {
-	{{- if $multistorage }}
-		switch {{ $groupReceiver }}.driver.Dialect() {
-		{{- range $_, $storage := $.Storage }}
-		case {{ join $storage.Dialects ", " }}:
-			return {{ $groupReceiver }}.{{ $storage }}Scan(ctx, v)
-		{{- end }}
-		default:
-			return errors.New("{{ $groupReceiver }}: unsupported dialect")
-		}
-	{{- else }}
-		return {{ $groupReceiver }}.{{ index $.Storage 0 }}Scan(ctx, v)
-	{{- end }}
+	query, err := {{ $groupReceiver }}.path(ctx)
+	if err != nil {
+		return err
+	}
+	{{ $groupReceiver }}.{{ $.Storage }} = query
+	return {{ $groupReceiver }}.{{ $.Storage }}Scan(ctx, v)
 }
 
 // ScanX is like Scan, but panics if an error occurs.
@@ -434,11 +425,9 @@ func ({{ $groupReceiver }} *{{ $groupBuilder }}) ScanX(ctx context.Context, v in
 	}
 {{ end }}
 
-{{- range $_, $storage := $.Storage }}
-	{{ with extend $ "Builder" $groupBuilder }}
-		{{ $tmpl := printf "dialect/%s/group" $storage }}
-		{{ xtemplate $tmpl . }}
-	{{ end }}
+{{ with extend $ "Builder" $groupBuilder }}
+	{{ $tmpl := printf "dialect/%s/group" $.Storage }}
+	{{ xtemplate $tmpl . }}
 {{ end }}
 
 {{/* select builder */}}
@@ -449,27 +438,20 @@ func ({{ $groupReceiver }} *{{ $groupBuilder }}) ScanX(ctx context.Context, v in
 type {{ $selectBuilder }} struct {
 	config
 	fields []string
-	// intermediate queries.
-	{{- range $_, $storage := $.Storage }}
-		{{ $storage }} {{ $storage.Builder}}
-	{{- end }}
+	// intermediate query (i.e. traversal path).
+	{{ $.Storage }} {{ $.Storage.Builder }}
+	path func(context.Context) ({{ $.Storage.Builder }}, error)
 }
 
 
 // Scan applies the selector query and scan the result into the given value.
 func ({{ $selectReceiver }} *{{ $selectBuilder }}) Scan(ctx context.Context, v interface{}) error {
-	{{- if $multistorage }}
-		switch {{ $selectReceiver }}.driver.Dialect() {
-		{{- range $_, $storage := $.Storage }}
-		case {{ join $storage.Dialects ", " }}:
-			return {{ $selectReceiver }}.{{ $storage }}Scan(ctx, v)
-		{{- end }}
-		default:
-			return errors.New("{{ $selectBuilder }}: unsupported dialect")
-		}
-	{{- else }}
-		return {{ $selectReceiver }}.{{ index $.Storage 0 }}Scan(ctx, v)
-	{{- end }}
+	query, err := {{ $selectReceiver }}.path(ctx)
+	if err != nil {
+		return err
+	}
+	{{ $selectReceiver }}.{{ $.Storage }} = query
+	return {{ $selectReceiver }}.{{ $.Storage }}Scan(ctx, v)
 }
 
 // ScanX is like Scan, but panics if an error occurs.
@@ -503,12 +485,9 @@ func ({{ $selectReceiver }} *{{ $selectBuilder }}) ScanX(ctx context.Context, v 
 	}
 {{ end }}
 
-{{- range $_, $storage := $.Storage }}
-	{{ with extend $ "Builder" $selectBuilder }}
-		{{ $tmpl := printf "dialect/%s/select" $storage }}
-		{{ xtemplate $tmpl . }}
-	{{ end }}
+{{ with extend $ "Builder" $selectBuilder }}
+	{{ $tmpl := printf "dialect/%s/select" $.Storage }}
+	{{ xtemplate $tmpl . }}
 {{ end }}
-
 
 {{ end }}
