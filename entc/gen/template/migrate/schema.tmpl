@@ -15,8 +15,8 @@ import (
 		"{{ $.Config.Package }}/{{ $n.Package }}"
 	{{- end }}
 
-	"github.com/facebookincubator/ent/schema/field"
-	"github.com/facebookincubator/ent/dialect/sql/schema"
+	"github.com/facebook/ent/schema/field"
+	"github.com/facebook/ent/dialect/sql/schema"
 )
 
 var (
@@ -27,7 +27,7 @@ var (
 		{{- $columns := pascal $t.Name | printf "%sColumns" }}
 		// {{ $columns }} holds the columns for the "{{ $t.Name }}" table.
 		{{ $columns }} = []*schema.Column{
-			{{- range $_, $c := $t.Columns }}
+			{{- range $c := $t.Columns }}
 				{ Name: "{{ $c.Name }}", Type: field.{{ $c.Type.ConstName }},
 				{{- if $c.Unique }} Unique: true,{{ end }}
 				{{- if $c.Increment }} Increment: true,{{ end }}

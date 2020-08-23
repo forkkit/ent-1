@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -10,15 +10,15 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/facebookincubator/ent/dialect/gremlin"
-	"github.com/facebookincubator/ent/dialect/gremlin/graph/dsl"
-	"github.com/facebookincubator/ent/dialect/gremlin/graph/dsl/__"
-	"github.com/facebookincubator/ent/dialect/gremlin/graph/dsl/g"
-	"github.com/facebookincubator/ent/dialect/gremlin/graph/dsl/p"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/card"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/predicate"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/spec"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/user"
+	"github.com/facebook/ent/dialect/gremlin"
+	"github.com/facebook/ent/dialect/gremlin/graph/dsl"
+	"github.com/facebook/ent/dialect/gremlin/graph/dsl/__"
+	"github.com/facebook/ent/dialect/gremlin/graph/dsl/g"
+	"github.com/facebook/ent/dialect/gremlin/graph/dsl/p"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/card"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/predicate"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/spec"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/user"
 )
 
 // CardUpdate is the builder for updating Card entities.
@@ -123,7 +123,7 @@ func (cu *CardUpdate) Save(ctx context.Context) (int, error) {
 	}
 	if v, ok := cu.mutation.Name(); ok {
 		if err := card.NameValidator(v); err != nil {
-			return 0, fmt.Errorf("ent: validator failed for field \"name\": %w", err)
+			return 0, &ValidationError{Name: "name", err: fmt.Errorf("ent: validator failed for field \"name\": %w", err)}
 		}
 	}
 
@@ -345,7 +345,7 @@ func (cuo *CardUpdateOne) Save(ctx context.Context) (*Card, error) {
 	}
 	if v, ok := cuo.mutation.Name(); ok {
 		if err := card.NameValidator(v); err != nil {
-			return nil, fmt.Errorf("ent: validator failed for field \"name\": %w", err)
+			return nil, &ValidationError{Name: "name", err: fmt.Errorf("ent: validator failed for field \"name\": %w", err)}
 		}
 	}
 
@@ -402,7 +402,7 @@ func (cuo *CardUpdateOne) gremlinSave(ctx context.Context) (*Card, error) {
 	res := &gremlin.Response{}
 	id, ok := cuo.mutation.ID()
 	if !ok {
-		return nil, fmt.Errorf("missing Card.ID for update")
+		return nil, &ValidationError{Name: "ID", err: fmt.Errorf("missing Card.ID for update")}
 	}
 	query, bindings := cuo.gremlin(id).Query()
 	if err := cuo.driver.Exec(ctx, query, bindings, res); err != nil {

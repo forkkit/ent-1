@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -15,6 +15,8 @@ const (
 	// EdgeUsers holds the string denoting the users edge name in mutations.
 	EdgeUsers = "users"
 
+	// UserFieldID holds the string denoting the id field of the User.
+	UserFieldID = "oid"
 	// Table holds the table name of the group in the database.
 	Table = "groups"
 	// UsersTable is the table the holds the users relation/edge. The primary key declared below.

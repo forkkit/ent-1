@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -11,12 +11,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/facebookincubator/ent/dialect/sql"
-	"github.com/facebookincubator/ent/dialect/sql/sqlgraph"
-	"github.com/facebookincubator/ent/entc/integration/hooks/ent/card"
-	"github.com/facebookincubator/ent/entc/integration/hooks/ent/predicate"
-	"github.com/facebookincubator/ent/entc/integration/hooks/ent/user"
-	"github.com/facebookincubator/ent/schema/field"
+	"github.com/facebook/ent/dialect/sql"
+	"github.com/facebook/ent/dialect/sql/sqlgraph"
+	"github.com/facebook/ent/entc/integration/hooks/ent/card"
+	"github.com/facebook/ent/entc/integration/hooks/ent/predicate"
+	"github.com/facebook/ent/entc/integration/hooks/ent/user"
+	"github.com/facebook/ent/schema/field"
 )
 
 // CardUpdate is the builder for updating Card entities.
@@ -369,7 +369,7 @@ func (cuo *CardUpdateOne) sqlSave(ctx context.Context) (c *Card, err error) {
 	}
 	id, ok := cuo.mutation.ID()
 	if !ok {
-		return nil, fmt.Errorf("missing Card.ID for update")
+		return nil, &ValidationError{Name: "ID", err: fmt.Errorf("missing Card.ID for update")}
 	}
 	_spec.Node.ID.Value = id
 	if value, ok := cuo.mutation.Name(); ok {

@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -7,7 +7,7 @@
 package user
 
 import (
-	"github.com/facebookincubator/ent"
+	"github.com/facebook/ent"
 )
 
 const (
@@ -19,6 +19,8 @@ const (
 	FieldVersion = "version"
 	// FieldName holds the string denoting the name field in the database.
 	FieldName = "name"
+	// FieldWorth holds the string denoting the worth field in the database.
+	FieldWorth = "worth"
 
 	// EdgeCards holds the string denoting the cards edge name in mutations.
 	EdgeCards = "cards"
@@ -49,6 +51,7 @@ var Columns = []string{
 	FieldID,
 	FieldVersion,
 	FieldName,
+	FieldWorth,
 }
 
 // ForeignKeys holds the SQL foreign-keys that are owned by the User type.
@@ -66,7 +69,7 @@ var (
 // package on the initialization of the application. Therefore,
 // it should be imported in the main as follows:
 //
-//	import _ "github.com/facebookincubator/ent/entc/integration/hooks/ent/runtime"
+//	import _ "github.com/facebook/ent/entc/integration/hooks/ent/runtime"
 //
 var (
 	Hooks [1]ent.Hook

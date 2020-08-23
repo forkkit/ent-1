@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/facebookincubator/ent/dialect"
-	"github.com/facebookincubator/ent/dialect/sql"
-	"github.com/facebookincubator/ent/schema/field"
+	"github.com/facebook/ent/dialect"
+	"github.com/facebook/ent/dialect/sql"
+	"github.com/facebook/ent/schema/field"
 )
 
 // Postgres is a postgres migration driver.
@@ -52,7 +52,10 @@ func (d *Postgres) init(ctx context.Context, tx dialect.Tx) error {
 func (d *Postgres) tableExist(ctx context.Context, tx dialect.Tx, name string) (bool, error) {
 	query, args := sql.Dialect(dialect.Postgres).
 		Select(sql.Count("*")).From(sql.Table("INFORMATION_SCHEMA.TABLES").Unquote()).
-		Where(sql.EQ("table_schema", sql.Raw("CURRENT_SCHEMA()")).And().EQ("table_name", name)).Query()
+		Where(sql.And(
+			sql.EQ("table_schema", sql.Raw("CURRENT_SCHEMA()")),
+			sql.EQ("table_name", name),
+		)).Query()
 	return exist(ctx, tx, query, args...)
 }
 
@@ -60,7 +63,11 @@ func (d *Postgres) tableExist(ctx context.Context, tx dialect.Tx, name string) (
 func (d *Postgres) fkExist(ctx context.Context, tx dialect.Tx, name string) (bool, error) {
 	query, args := sql.Dialect(dialect.Postgres).
 		Select(sql.Count("*")).From(sql.Table("INFORMATION_SCHEMA.TABLE_CONSTRAINTS").Unquote()).
-		Where(sql.EQ("table_schema", sql.Raw("CURRENT_SCHEMA()")).And().EQ("constraint_type", "FOREIGN KEY").And().EQ("constraint_name", name)).Query()
+		Where(sql.And(
+			sql.EQ("table_schema", sql.Raw("CURRENT_SCHEMA()")),
+			sql.EQ("constraint_type", "FOREIGN KEY"),
+			sql.EQ("constraint_name", name),
+		)).Query()
 	return exist(ctx, tx, query, args...)
 }
 
@@ -82,7 +89,10 @@ func (d *Postgres) table(ctx context.Context, tx dialect.Tx, name string) (*Tabl
 	query, args := sql.Dialect(dialect.Postgres).
 		Select("column_name", "data_type", "is_nullable", "column_default").
 		From(sql.Table("INFORMATION_SCHEMA.COLUMNS").Unquote()).
-		Where(sql.EQ("table_schema", sql.Raw("CURRENT_SCHEMA()")).And().EQ("table_name", name)).Query()
+		Where(sql.And(
+			sql.EQ("table_schema", sql.Raw("CURRENT_SCHEMA()")),
+			sql.EQ("table_name", name),
+		)).Query()
 	if err := tx.Query(ctx, query, args, rows); err != nil {
 		return nil, fmt.Errorf("postgres: reading table description %v", err)
 	}
@@ -329,11 +339,30 @@ func (d *Postgres) alterColumn(c *Column) (ops []*sql.ColumnBuilder) {
 	return ops
 }
 
+// hasUniqueName reports if the index has a unique name in the schema.
+func hasUniqueName(i *Index) bool {
+	name := i.Name
+	// The "_key" suffix is added by Postgres for implicit indexes.
+	if strings.HasSuffix(name, "_key") {
+		name = strings.TrimSuffix(name, "_key")
+	}
+	suffix := strings.Join(i.columnNames(), "_")
+	if !strings.HasSuffix(name, suffix) {
+		return true // Assume it has a custom storage-key.
+	}
+	// The codegen prefixes by default indexes with the type name.
+	// For example, an index "users"("name"), will named as "user_name".
+	return name != suffix
+}
+
 // addIndex returns the querying for adding an index to PostgreSQL.
 func (d *Postgres) addIndex(i *Index, table string) *sql.IndexBuilder {
-	// Since index name should be unique in pg_class for schema,
-	// we prefix it with the table name and remove on read.
-	name := fmt.Sprintf("%s_%s", table, i.Name)
+	name := i.Name
+	if !hasUniqueName(i) {
+		// Since index name should be unique in pg_class for schema,
+		// we prefix it with the table name and remove on read.
+		name = fmt.Sprintf("%s_%s", table, i.Name)
+	}
 	idx := sql.Dialect(dialect.Postgres).
 		CreateIndex(name).Table(table)
 	if i.Unique {
@@ -349,12 +378,16 @@ func (d *Postgres) addIndex(i *Index, table string) *sql.IndexBuilder {
 func (d *Postgres) dropIndex(ctx context.Context, tx dialect.Tx, idx *Index, table string) error {
 	name := idx.Name
 	build := sql.Dialect(dialect.Postgres)
-	if prefix := table + "_"; !strings.HasPrefix(name, prefix) {
+	if prefix := table + "_"; !strings.HasPrefix(name, prefix) && !hasUniqueName(idx) {
 		name = prefix + name
 	}
 	query, args := sql.Dialect(dialect.Postgres).
 		Select(sql.Count("*")).From(sql.Table("INFORMATION_SCHEMA.TABLE_CONSTRAINTS").Unquote()).
-		Where(sql.EQ("table_schema", sql.Raw("CURRENT_SCHEMA()")).And().EQ("constraint_type", "UNIQUE").And().EQ("constraint_name", name)).
+		Where(sql.And(
+			sql.EQ("table_schema", sql.Raw("CURRENT_SCHEMA()")),
+			sql.EQ("constraint_type", "UNIQUE"),
+			sql.EQ("constraint_name", name),
+		)).
 		Query()
 	exists, err := exist(ctx, tx, query, args...)
 	if err != nil {

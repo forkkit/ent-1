@@ -8,9 +8,9 @@ package ent
 import (
 	"context"
 
-	"github.com/facebookincubator/ent/schema/edge"
-	"github.com/facebookincubator/ent/schema/field"
-	"github.com/facebookincubator/ent/schema/index"
+	"github.com/facebook/ent/schema/edge"
+	"github.com/facebook/ent/schema/field"
+	"github.com/facebook/ent/schema/index"
 )
 
 type (
@@ -281,14 +281,10 @@ type (
 		// defined in the schema.
 		ResetEdge(name string) error
 
-		// In order to not break users code, we release the codegen part
-		// first, and uncomment the new method after a minor version release.
-		//
 		// OldField returns the old value of the field from the database.
 		// An error is returned if the mutation operation is not UpdateOne,
 		// or the query to the database was failed.
-		//
-		// OldField(ctx context.Context, name string) (Value, error)
+		OldField(ctx context.Context, name string) (Value, error)
 	}
 
 	// Mutator is the interface that wraps the Mutate method.

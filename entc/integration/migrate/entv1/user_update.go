@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -10,12 +10,12 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/facebookincubator/ent/dialect/sql"
-	"github.com/facebookincubator/ent/dialect/sql/sqlgraph"
-	"github.com/facebookincubator/ent/entc/integration/migrate/entv1/car"
-	"github.com/facebookincubator/ent/entc/integration/migrate/entv1/predicate"
-	"github.com/facebookincubator/ent/entc/integration/migrate/entv1/user"
-	"github.com/facebookincubator/ent/schema/field"
+	"github.com/facebook/ent/dialect/sql"
+	"github.com/facebook/ent/dialect/sql/sqlgraph"
+	"github.com/facebook/ent/entc/integration/migrate/entv1/car"
+	"github.com/facebook/ent/entc/integration/migrate/entv1/predicate"
+	"github.com/facebook/ent/entc/integration/migrate/entv1/user"
+	"github.com/facebook/ent/schema/field"
 )
 
 // UserUpdate is the builder for updating User entities.
@@ -126,6 +126,26 @@ func (uu *UserUpdate) SetNillableState(u *user.State) *UserUpdate {
 // ClearState clears the value of state.
 func (uu *UserUpdate) ClearState() *UserUpdate {
 	uu.mutation.ClearState()
+	return uu
+}
+
+// SetStatus sets the status field.
+func (uu *UserUpdate) SetStatus(s string) *UserUpdate {
+	uu.mutation.SetStatus(s)
+	return uu
+}
+
+// SetNillableStatus sets the status field if the given value is not nil.
+func (uu *UserUpdate) SetNillableStatus(s *string) *UserUpdate {
+	if s != nil {
+		uu.SetStatus(*s)
+	}
+	return uu
+}
+
+// ClearStatus clears the value of status.
+func (uu *UserUpdate) ClearStatus() *UserUpdate {
+	uu.mutation.ClearStatus()
 	return uu
 }
 
@@ -243,12 +263,12 @@ func (uu *UserUpdate) ClearCar() *UserUpdate {
 func (uu *UserUpdate) Save(ctx context.Context) (int, error) {
 	if v, ok := uu.mutation.Name(); ok {
 		if err := user.NameValidator(v); err != nil {
-			return 0, fmt.Errorf("entv1: validator failed for field \"name\": %w", err)
+			return 0, &ValidationError{Name: "name", err: fmt.Errorf("entv1: validator failed for field \"name\": %w", err)}
 		}
 	}
 	if v, ok := uu.mutation.State(); ok {
 		if err := user.StateValidator(v); err != nil {
-			return 0, fmt.Errorf("entv1: validator failed for field \"state\": %w", err)
+			return 0, &ValidationError{Name: "state", err: fmt.Errorf("entv1: validator failed for field \"state\": %w", err)}
 		}
 	}
 
@@ -397,6 +417,19 @@ func (uu *UserUpdate) sqlSave(ctx context.Context) (n int, err error) {
 		_spec.Fields.Clear = append(_spec.Fields.Clear, &sqlgraph.FieldSpec{
 			Type:   field.TypeEnum,
 			Column: user.FieldState,
+		})
+	}
+	if value, ok := uu.mutation.Status(); ok {
+		_spec.Fields.Set = append(_spec.Fields.Set, &sqlgraph.FieldSpec{
+			Type:   field.TypeString,
+			Value:  value,
+			Column: user.FieldStatus,
+		})
+	}
+	if uu.mutation.StatusCleared() {
+		_spec.Fields.Clear = append(_spec.Fields.Clear, &sqlgraph.FieldSpec{
+			Type:   field.TypeString,
+			Column: user.FieldStatus,
 		})
 	}
 	if uu.mutation.ParentCleared() {
@@ -657,6 +690,26 @@ func (uuo *UserUpdateOne) ClearState() *UserUpdateOne {
 	return uuo
 }
 
+// SetStatus sets the status field.
+func (uuo *UserUpdateOne) SetStatus(s string) *UserUpdateOne {
+	uuo.mutation.SetStatus(s)
+	return uuo
+}
+
+// SetNillableStatus sets the status field if the given value is not nil.
+func (uuo *UserUpdateOne) SetNillableStatus(s *string) *UserUpdateOne {
+	if s != nil {
+		uuo.SetStatus(*s)
+	}
+	return uuo
+}
+
+// ClearStatus clears the value of status.
+func (uuo *UserUpdateOne) ClearStatus() *UserUpdateOne {
+	uuo.mutation.ClearStatus()
+	return uuo
+}
+
 // SetParentID sets the parent edge to User by id.
 func (uuo *UserUpdateOne) SetParentID(id int) *UserUpdateOne {
 	uuo.mutation.SetParentID(id)
@@ -771,12 +824,12 @@ func (uuo *UserUpdateOne) ClearCar() *UserUpdateOne {
 func (uuo *UserUpdateOne) Save(ctx context.Context) (*User, error) {
 	if v, ok := uuo.mutation.Name(); ok {
 		if err := user.NameValidator(v); err != nil {
-			return nil, fmt.Errorf("entv1: validator failed for field \"name\": %w", err)
+			return nil, &ValidationError{Name: "name", err: fmt.Errorf("entv1: validator failed for field \"name\": %w", err)}
 		}
 	}
 	if v, ok := uuo.mutation.State(); ok {
 		if err := user.StateValidator(v); err != nil {
-			return nil, fmt.Errorf("entv1: validator failed for field \"state\": %w", err)
+			return nil, &ValidationError{Name: "state", err: fmt.Errorf("entv1: validator failed for field \"state\": %w", err)}
 		}
 	}
 
@@ -842,7 +895,7 @@ func (uuo *UserUpdateOne) sqlSave(ctx context.Context) (u *User, err error) {
 	}
 	id, ok := uuo.mutation.ID()
 	if !ok {
-		return nil, fmt.Errorf("missing User.ID for update")
+		return nil, &ValidationError{Name: "ID", err: fmt.Errorf("missing User.ID for update")}
 	}
 	_spec.Node.ID.Value = id
 	if value, ok := uuo.mutation.Age(); ok {
@@ -923,6 +976,19 @@ func (uuo *UserUpdateOne) sqlSave(ctx context.Context) (u *User, err error) {
 		_spec.Fields.Clear = append(_spec.Fields.Clear, &sqlgraph.FieldSpec{
 			Type:   field.TypeEnum,
 			Column: user.FieldState,
+		})
+	}
+	if value, ok := uuo.mutation.Status(); ok {
+		_spec.Fields.Set = append(_spec.Fields.Set, &sqlgraph.FieldSpec{
+			Type:   field.TypeString,
+			Value:  value,
+			Column: user.FieldStatus,
+		})
+	}
+	if uuo.mutation.StatusCleared() {
+		_spec.Fields.Clear = append(_spec.Fields.Clear, &sqlgraph.FieldSpec{
+			Type:   field.TypeString,
+			Column: user.FieldStatus,
 		})
 	}
 	if uuo.mutation.ParentCleared() {

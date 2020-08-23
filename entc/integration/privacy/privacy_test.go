@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -9,11 +9,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/facebookincubator/ent/entc/integration/privacy/ent/enttest"
-	"github.com/facebookincubator/ent/entc/integration/privacy/ent/galaxy"
-	"github.com/facebookincubator/ent/entc/integration/privacy/ent/planet"
-	"github.com/facebookincubator/ent/entc/integration/privacy/ent/privacy"
-	"github.com/facebookincubator/ent/entc/integration/privacy/rule"
+	"github.com/facebook/ent/entc/integration/privacy/ent/enttest"
+	"github.com/facebook/ent/entc/integration/privacy/ent/galaxy"
+	"github.com/facebook/ent/entc/integration/privacy/ent/planet"
+	"github.com/facebook/ent/entc/integration/privacy/ent/privacy"
+	"github.com/facebook/ent/entc/integration/privacy/rule"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/require"

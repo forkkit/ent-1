@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"text/template"
 
-	"github.com/facebookincubator/ent/entc/gen/internal"
+	"github.com/facebook/ent/entc/gen/internal"
 )
 
 //go:generate go run github.com/go-bindata/go-bindata/go-bindata -o=internal/bindata.go -pkg=internal -modtime=1 ./template/...
@@ -22,8 +22,9 @@ type (
 	// TypeTemplate specifies a template that is executed with
 	// each Type object of the graph.
 	TypeTemplate struct {
-		Name   string             // template name.
-		Format func(*Type) string // file name format.
+		Name          string             // template name.
+		Format        func(*Type) string // file name format.
+		ExtendPattern string             // extend pattern.
 	}
 	// GraphTemplate specifies a template that is executed with
 	// the Graph object.
@@ -66,6 +67,7 @@ var (
 			Format: func(t *Type) string {
 				return fmt.Sprintf("%s/%s.go", t.Package(), t.Package())
 			},
+			ExtendPattern: "meta/additional/*",
 		},
 	}
 	// GraphTemplates holds the templates applied on the graph.
@@ -160,4 +162,13 @@ func init() {
 
 func pkgf(s string) func(t *Type) string {
 	return func(t *Type) string { return fmt.Sprintf(s, t.Package()) }
+}
+
+// Match reports if the given name matches the extended pattern.
+func (t TypeTemplate) Match(name string) bool {
+	if t.ExtendPattern == "" {
+		return false
+	}
+	matched, _ := filepath.Match(t.ExtendPattern, name)
+	return matched
 }

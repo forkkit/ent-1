@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -12,11 +12,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/facebookincubator/ent"
-	"github.com/facebookincubator/ent/dialect/gremlin"
-	"github.com/facebookincubator/ent/dialect/gremlin/encoding/graphson"
-	"github.com/facebookincubator/ent/dialect/gremlin/graph/dsl"
-	"github.com/facebookincubator/ent/dialect/gremlin/graph/dsl/__"
+	"github.com/facebook/ent"
+	"github.com/facebook/ent/dialect/gremlin"
+	"github.com/facebook/ent/dialect/gremlin/encoding/graphson"
+	"github.com/facebook/ent/dialect/gremlin/graph/dsl"
+	"github.com/facebook/ent/dialect/gremlin/graph/dsl/__"
 )
 
 // ent aliases to avoid import conflict in user's code.
@@ -147,6 +147,31 @@ func Sum(field string) AggregateFunc {
 		}
 		return end, __.As(start).Unfold().Values(field).Sum().As(end)
 	}
+}
+
+// ValidationError returns when validating a field fails.
+type ValidationError struct {
+	Name string // Field or edge name.
+	err  error
+}
+
+// Error implements the error interface.
+func (e *ValidationError) Error() string {
+	return e.err.Error()
+}
+
+// Unwrap implements the errors.Wrapper interface.
+func (e *ValidationError) Unwrap() error {
+	return errors.Unwrap(e.err)
+}
+
+// IsValidationError returns a boolean indicating whether the error is a validaton error.
+func IsValidationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var e *ValidationError
+	return errors.As(err, &e)
 }
 
 // NotFoundError returns when trying to fetch a specific entity and it was not found in the database.

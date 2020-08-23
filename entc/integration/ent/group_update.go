@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -12,14 +12,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/facebookincubator/ent/dialect/sql"
-	"github.com/facebookincubator/ent/dialect/sql/sqlgraph"
-	"github.com/facebookincubator/ent/entc/integration/ent/file"
-	"github.com/facebookincubator/ent/entc/integration/ent/group"
-	"github.com/facebookincubator/ent/entc/integration/ent/groupinfo"
-	"github.com/facebookincubator/ent/entc/integration/ent/predicate"
-	"github.com/facebookincubator/ent/entc/integration/ent/user"
-	"github.com/facebookincubator/ent/schema/field"
+	"github.com/facebook/ent/dialect/sql"
+	"github.com/facebook/ent/dialect/sql/sqlgraph"
+	"github.com/facebook/ent/entc/integration/ent/file"
+	"github.com/facebook/ent/entc/integration/ent/group"
+	"github.com/facebook/ent/entc/integration/ent/groupinfo"
+	"github.com/facebook/ent/entc/integration/ent/predicate"
+	"github.com/facebook/ent/entc/integration/ent/user"
+	"github.com/facebook/ent/schema/field"
 )
 
 // GroupUpdate is the builder for updating Group entities.
@@ -225,17 +225,17 @@ func (gu *GroupUpdate) ClearInfo() *GroupUpdate {
 func (gu *GroupUpdate) Save(ctx context.Context) (int, error) {
 	if v, ok := gu.mutation.GetType(); ok {
 		if err := group.TypeValidator(v); err != nil {
-			return 0, fmt.Errorf("ent: validator failed for field \"type\": %w", err)
+			return 0, &ValidationError{Name: "type", err: fmt.Errorf("ent: validator failed for field \"type\": %w", err)}
 		}
 	}
 	if v, ok := gu.mutation.MaxUsers(); ok {
 		if err := group.MaxUsersValidator(v); err != nil {
-			return 0, fmt.Errorf("ent: validator failed for field \"max_users\": %w", err)
+			return 0, &ValidationError{Name: "max_users", err: fmt.Errorf("ent: validator failed for field \"max_users\": %w", err)}
 		}
 	}
 	if v, ok := gu.mutation.Name(); ok {
 		if err := group.NameValidator(v); err != nil {
-			return 0, fmt.Errorf("ent: validator failed for field \"name\": %w", err)
+			return 0, &ValidationError{Name: "name", err: fmt.Errorf("ent: validator failed for field \"name\": %w", err)}
 		}
 	}
 
@@ -719,17 +719,17 @@ func (guo *GroupUpdateOne) ClearInfo() *GroupUpdateOne {
 func (guo *GroupUpdateOne) Save(ctx context.Context) (*Group, error) {
 	if v, ok := guo.mutation.GetType(); ok {
 		if err := group.TypeValidator(v); err != nil {
-			return nil, fmt.Errorf("ent: validator failed for field \"type\": %w", err)
+			return nil, &ValidationError{Name: "type", err: fmt.Errorf("ent: validator failed for field \"type\": %w", err)}
 		}
 	}
 	if v, ok := guo.mutation.MaxUsers(); ok {
 		if err := group.MaxUsersValidator(v); err != nil {
-			return nil, fmt.Errorf("ent: validator failed for field \"max_users\": %w", err)
+			return nil, &ValidationError{Name: "max_users", err: fmt.Errorf("ent: validator failed for field \"max_users\": %w", err)}
 		}
 	}
 	if v, ok := guo.mutation.Name(); ok {
 		if err := group.NameValidator(v); err != nil {
-			return nil, fmt.Errorf("ent: validator failed for field \"name\": %w", err)
+			return nil, &ValidationError{Name: "name", err: fmt.Errorf("ent: validator failed for field \"name\": %w", err)}
 		}
 	}
 
@@ -798,7 +798,7 @@ func (guo *GroupUpdateOne) sqlSave(ctx context.Context) (gr *Group, err error) {
 	}
 	id, ok := guo.mutation.ID()
 	if !ok {
-		return nil, fmt.Errorf("missing Group.ID for update")
+		return nil, &ValidationError{Name: "ID", err: fmt.Errorf("missing Group.ID for update")}
 	}
 	_spec.Node.ID.Value = id
 	if value, ok := guo.mutation.Active(); ok {

@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/facebookincubator/ent/dialect"
-	"github.com/facebookincubator/ent/dialect/sql"
-	"github.com/facebookincubator/ent/schema/field"
+	"github.com/facebook/ent/dialect"
+	"github.com/facebook/ent/dialect/sql"
+	"github.com/facebook/ent/schema/field"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
@@ -162,6 +162,7 @@ func TestMySQL_Create(t *testing.T) {
 						{Name: "big", Type: field.TypeInt64},
 						{Name: "big_unsigned", Type: field.TypeUint64},
 						{Name: "decimal", Type: field.TypeFloat64, SchemaType: map[string]string{dialect.MySQL: "decimal(6,2)"}},
+						{Name: "timestamp", Type: field.TypeTime, SchemaType: map[string]string{dialect.MySQL: "TIMESTAMP"}},
 					},
 					PrimaryKey: []*Column{
 						{Name: "id", Type: field.TypeInt, Increment: true},
@@ -186,7 +187,8 @@ func TestMySQL_Create(t *testing.T) {
 						AddRow("small_unsigned", "smallint unsigned", "NO", "YES", "NULL", "", "", "").
 						AddRow("big", "bigint", "NO", "YES", "NULL", "", "", "").
 						AddRow("big_unsigned", "bigint unsigned", "NO", "YES", "NULL", "", "", "").
-						AddRow("decimal", "decimal(6,2)", "NO", "YES", "NULL", "", "", ""))
+						AddRow("decimal", "decimal(6,2)", "NO", "YES", "NULL", "", "", "").
+						AddRow("timestamp", "timestamp", "NO", "NO", "CURRENT_TIMESTAMP", "DEFAULT_GENERATED on update CURRENT_TIMESTAMP", "", ""))
 				mock.ExpectQuery(escape("SELECT `index_name`, `column_name`, `non_unique`, `seq_in_index` FROM INFORMATION_SCHEMA.STATISTICS WHERE `TABLE_SCHEMA` = (SELECT DATABASE()) AND `TABLE_NAME` = ? ORDER BY `index_name`, `seq_in_index`")).
 					WithArgs("users").
 					WillReturnRows(sqlmock.NewRows([]string{"index_name", "column_name", "non_unique", "seq_in_index"}).
@@ -698,7 +700,7 @@ func TestMySQL_Create(t *testing.T) {
 						AddRow("old_index", "old", "0", "1").
 						AddRow("parent_id", "parent_id", "0", "1"))
 				mock.fkExists("parent_id", true)
-				mock.ExpectQuery(escape("SELECT `column_name` FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS t1 JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS t2 ON `t1`.`constraint_name` = `t2`.`constraint_name` WHERE (`t2`.`constraint_type` = 'FOREIGN KEY') AND (`t2`.`table_schema` = (SELECT DATABASE())) AND (`t1`.`table_schema` = (SELECT DATABASE())) AND (`t2`.`constraint_name` = ?)")).
+				mock.ExpectQuery(escape("SELECT `column_name` FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS t1 JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS t2 ON `t1`.`constraint_name` = `t2`.`constraint_name` WHERE `t2`.`constraint_type` = 'FOREIGN KEY' AND `t2`.`table_schema` = (SELECT DATABASE()) AND `t1`.`table_schema` = (SELECT DATABASE()) AND `t2`.`constraint_name` = ?")).
 					WithArgs("parent_id").
 					WillReturnRows(sqlmock.NewRows([]string{"COLUMN_NAME"}).
 						AddRow("parent_id"))
@@ -851,7 +853,7 @@ func TestMySQL_Create(t *testing.T) {
 				mock.start("5.7.23")
 				mock.tableExists("ent_types", false)
 				// create ent_types table.
-				mock.ExpectExec(escape("CREATE TABLE IF NOT EXISTS `ent_types`(`id` bigint AUTO_INCREMENT NOT NULL, `type` varchar(255) UNIQUE NOT NULL, PRIMARY KEY(`id`)) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin")).
+				mock.ExpectExec(escape("CREATE TABLE IF NOT EXISTS `ent_types`(`id` bigint unsigned AUTO_INCREMENT NOT NULL, `type` varchar(255) UNIQUE NOT NULL, PRIMARY KEY(`id`)) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin")).
 					WillReturnResult(sqlmock.NewResult(0, 1))
 				mock.tableExists("users", false)
 				mock.ExpectExec(escape("CREATE TABLE IF NOT EXISTS `users`(`id` bigint AUTO_INCREMENT NOT NULL, PRIMARY KEY(`id`)) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin")).

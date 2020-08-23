@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -10,12 +10,12 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/facebookincubator/ent/dialect/sql"
-	"github.com/facebookincubator/ent/dialect/sql/sqlgraph"
-	"github.com/facebookincubator/ent/examples/m2m2types/ent/group"
-	"github.com/facebookincubator/ent/examples/m2m2types/ent/predicate"
-	"github.com/facebookincubator/ent/examples/m2m2types/ent/user"
-	"github.com/facebookincubator/ent/schema/field"
+	"github.com/facebook/ent/dialect/sql"
+	"github.com/facebook/ent/dialect/sql/sqlgraph"
+	"github.com/facebook/ent/examples/m2m2types/ent/group"
+	"github.com/facebook/ent/examples/m2m2types/ent/predicate"
+	"github.com/facebook/ent/examples/m2m2types/ent/user"
+	"github.com/facebook/ent/schema/field"
 )
 
 // GroupUpdate is the builder for updating Group entities.
@@ -312,7 +312,7 @@ func (guo *GroupUpdateOne) sqlSave(ctx context.Context) (gr *Group, err error) {
 	}
 	id, ok := guo.mutation.ID()
 	if !ok {
-		return nil, fmt.Errorf("missing Group.ID for update")
+		return nil, &ValidationError{Name: "ID", err: fmt.Errorf("missing Group.ID for update")}
 	}
 	_spec.Node.ID.Value = id
 	if value, ok := guo.mutation.Name(); ok {

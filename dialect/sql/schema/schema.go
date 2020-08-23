@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/facebookincubator/ent/dialect/sql"
-	"github.com/facebookincubator/ent/schema/field"
+	"github.com/facebook/ent/dialect/sql"
+	"github.com/facebook/ent/schema/field"
 )
 
 const (
@@ -171,6 +171,9 @@ func (c *Column) ConvertibleTo(d *Column) bool {
 	case c.UintType() && d.IntType():
 		// uintX can not be converted to intY, when X > Y.
 		return c.Type-field.TypeUint8 <= d.Type-field.TypeInt8
+	case c.Type == field.TypeString && d.Type == field.TypeEnum ||
+		c.Type == field.TypeEnum && d.Type == field.TypeString:
+		return true
 	}
 	return c.FloatType() && d.FloatType()
 }
@@ -212,7 +215,7 @@ func (c *Column) ScanDefault(value string) error {
 			return fmt.Errorf("scanning bool value for column %q: %v", c.Name, err)
 		}
 		c.Default = v.Bool
-	case c.Type == field.TypeString:
+	case c.Type == field.TypeString || c.Type == field.TypeEnum:
 		v := &sql.NullString{}
 		if err := v.Scan(value); err != nil {
 			return fmt.Errorf("scanning string value for column %q: %v", c.Name, err)
@@ -225,7 +228,7 @@ func (c *Column) ScanDefault(value string) error {
 		}
 		c.Default = v.String
 	default:
-		return fmt.Errorf("unsupported type: %v", c.Type)
+		return fmt.Errorf("unsupported default type: %v", c.Type)
 	}
 	return nil
 }
@@ -253,7 +256,7 @@ func (c *Column) defaultValue(b *sql.ColumnBuilder) {
 // supportDefault reports if the column type supports default value.
 func (c Column) supportDefault() bool {
 	switch {
-	case c.Type == field.TypeString:
+	case c.Type == field.TypeString || c.Type == field.TypeEnum:
 		return c.Size < 1<<16 // not a text.
 	case c.Type.Numeric(), c.Type == field.TypeBool:
 		return true
@@ -397,6 +400,18 @@ func (i *Index) sameAs(idx *Index) bool {
 		}
 	}
 	return true
+}
+
+// columnNames returns the names of the columns of the index.
+func (i *Index) columnNames() []string {
+	if len(i.columns) > 0 {
+		return i.columns
+	}
+	columns := make([]string, 0, len(i.Columns))
+	for _, c := range i.Columns {
+		columns = append(columns, c.Name)
+	}
+	return columns
 }
 
 // Indexes used for scanning all sql.Rows into a list of indexes, because

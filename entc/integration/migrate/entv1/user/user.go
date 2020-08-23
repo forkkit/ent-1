@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -29,6 +29,8 @@ const (
 	FieldBlob = "blob"
 	// FieldState holds the string denoting the state field in the database.
 	FieldState = "state"
+	// FieldStatus holds the string denoting the status field in the database.
+	FieldStatus = "status"
 
 	// EdgeParent holds the string denoting the parent edge name in mutations.
 	EdgeParent = "parent"
@@ -39,6 +41,8 @@ const (
 	// EdgeCar holds the string denoting the car edge name in mutations.
 	EdgeCar = "car"
 
+	// CarFieldID holds the string denoting the id field of the Car.
+	CarFieldID = "id"
 	// Table holds the table name of the user in the database.
 	Table = "users"
 	// ParentTable is the table the holds the parent relation/edge.
@@ -72,6 +76,7 @@ var Columns = []string{
 	FieldRenamed,
 	FieldBlob,
 	FieldState,
+	FieldStatus,
 }
 
 // ForeignKeys holds the SQL foreign-keys that are owned by the User type.
@@ -98,7 +103,7 @@ func (s State) String() string {
 	return string(s)
 }
 
-// StateValidator is a validator for the "s" field enum values. It is called by the builders before save.
+// StateValidator is a validator for the "state" field enum values. It is called by the builders before save.
 func StateValidator(s State) error {
 	switch s {
 	case StateLoggedIn, StateLoggedOut:

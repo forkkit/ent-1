@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -10,11 +10,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/facebookincubator/ent/dialect/sql"
-	"github.com/facebookincubator/ent/dialect/sql/sqlgraph"
-	"github.com/facebookincubator/ent/examples/o2orecur/ent/node"
-	"github.com/facebookincubator/ent/examples/o2orecur/ent/predicate"
-	"github.com/facebookincubator/ent/schema/field"
+	"github.com/facebook/ent/dialect/sql"
+	"github.com/facebook/ent/dialect/sql/sqlgraph"
+	"github.com/facebook/ent/examples/o2orecur/ent/node"
+	"github.com/facebook/ent/examples/o2orecur/ent/predicate"
+	"github.com/facebook/ent/schema/field"
 )
 
 // NodeUpdate is the builder for updating Node entities.
@@ -404,7 +404,7 @@ func (nuo *NodeUpdateOne) sqlSave(ctx context.Context) (n *Node, err error) {
 	}
 	id, ok := nuo.mutation.ID()
 	if !ok {
-		return nil, fmt.Errorf("missing Node.ID for update")
+		return nil, &ValidationError{Name: "ID", err: fmt.Errorf("missing Node.ID for update")}
 	}
 	_spec.Node.ID.Value = id
 	if value, ok := nuo.mutation.Value(); ok {

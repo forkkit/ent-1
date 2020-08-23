@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -15,20 +15,21 @@ import (
 	"sync"
 	"time"
 
-	"github.com/facebookincubator/ent/entc/integration/ent/schema"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/card"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/comment"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/fieldtype"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/file"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/filetype"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/group"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/groupinfo"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/node"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/pet"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/spec"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/user"
+	"github.com/facebook/ent/entc/integration/ent/role"
+	"github.com/facebook/ent/entc/integration/ent/schema"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/card"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/comment"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/fieldtype"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/file"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/filetype"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/group"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/groupinfo"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/node"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/pet"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/spec"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/user"
 
-	"github.com/facebookincubator/ent"
+	"github.com/facebook/ent"
 )
 
 const (
@@ -1271,6 +1272,12 @@ type FieldTypeMutation struct {
 	addschema_int8             *schema.Int8
 	schema_int64               *schema.Int64
 	addschema_int64            *schema.Int64
+	schema_float               *schema.Float64
+	addschema_float            *schema.Float64
+	schema_float32             *schema.Float32
+	addschema_float32          *schema.Float32
+	null_float                 *sql.NullFloat64
+	role                       *role.Role
 	clearedFields              map[string]struct{}
 	done                       bool
 	oldValue                   func(context.Context) (*FieldType, error)
@@ -3902,6 +3909,235 @@ func (m *FieldTypeMutation) ResetSchemaInt64() {
 	delete(m.clearedFields, fieldtype.FieldSchemaInt64)
 }
 
+// SetSchemaFloat sets the schema_float field.
+func (m *FieldTypeMutation) SetSchemaFloat(s schema.Float64) {
+	m.schema_float = &s
+	m.addschema_float = nil
+}
+
+// SchemaFloat returns the schema_float value in the mutation.
+func (m *FieldTypeMutation) SchemaFloat() (r schema.Float64, exists bool) {
+	v := m.schema_float
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSchemaFloat returns the old schema_float value of the FieldType.
+// If the FieldType object wasn't provided to the builder, the object is fetched
+// from the database.
+// An error is returned if the mutation operation is not UpdateOne, or database query fails.
+func (m *FieldTypeMutation) OldSchemaFloat(ctx context.Context) (v schema.Float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, fmt.Errorf("OldSchemaFloat is allowed only on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, fmt.Errorf("OldSchemaFloat requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSchemaFloat: %w", err)
+	}
+	return oldValue.SchemaFloat, nil
+}
+
+// AddSchemaFloat adds s to schema_float.
+func (m *FieldTypeMutation) AddSchemaFloat(s schema.Float64) {
+	if m.addschema_float != nil {
+		*m.addschema_float += s
+	} else {
+		m.addschema_float = &s
+	}
+}
+
+// AddedSchemaFloat returns the value that was added to the schema_float field in this mutation.
+func (m *FieldTypeMutation) AddedSchemaFloat() (r schema.Float64, exists bool) {
+	v := m.addschema_float
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearSchemaFloat clears the value of schema_float.
+func (m *FieldTypeMutation) ClearSchemaFloat() {
+	m.schema_float = nil
+	m.addschema_float = nil
+	m.clearedFields[fieldtype.FieldSchemaFloat] = struct{}{}
+}
+
+// SchemaFloatCleared returns if the field schema_float was cleared in this mutation.
+func (m *FieldTypeMutation) SchemaFloatCleared() bool {
+	_, ok := m.clearedFields[fieldtype.FieldSchemaFloat]
+	return ok
+}
+
+// ResetSchemaFloat reset all changes of the "schema_float" field.
+func (m *FieldTypeMutation) ResetSchemaFloat() {
+	m.schema_float = nil
+	m.addschema_float = nil
+	delete(m.clearedFields, fieldtype.FieldSchemaFloat)
+}
+
+// SetSchemaFloat32 sets the schema_float32 field.
+func (m *FieldTypeMutation) SetSchemaFloat32(s schema.Float32) {
+	m.schema_float32 = &s
+	m.addschema_float32 = nil
+}
+
+// SchemaFloat32 returns the schema_float32 value in the mutation.
+func (m *FieldTypeMutation) SchemaFloat32() (r schema.Float32, exists bool) {
+	v := m.schema_float32
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSchemaFloat32 returns the old schema_float32 value of the FieldType.
+// If the FieldType object wasn't provided to the builder, the object is fetched
+// from the database.
+// An error is returned if the mutation operation is not UpdateOne, or database query fails.
+func (m *FieldTypeMutation) OldSchemaFloat32(ctx context.Context) (v schema.Float32, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, fmt.Errorf("OldSchemaFloat32 is allowed only on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, fmt.Errorf("OldSchemaFloat32 requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSchemaFloat32: %w", err)
+	}
+	return oldValue.SchemaFloat32, nil
+}
+
+// AddSchemaFloat32 adds s to schema_float32.
+func (m *FieldTypeMutation) AddSchemaFloat32(s schema.Float32) {
+	if m.addschema_float32 != nil {
+		*m.addschema_float32 += s
+	} else {
+		m.addschema_float32 = &s
+	}
+}
+
+// AddedSchemaFloat32 returns the value that was added to the schema_float32 field in this mutation.
+func (m *FieldTypeMutation) AddedSchemaFloat32() (r schema.Float32, exists bool) {
+	v := m.addschema_float32
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearSchemaFloat32 clears the value of schema_float32.
+func (m *FieldTypeMutation) ClearSchemaFloat32() {
+	m.schema_float32 = nil
+	m.addschema_float32 = nil
+	m.clearedFields[fieldtype.FieldSchemaFloat32] = struct{}{}
+}
+
+// SchemaFloat32Cleared returns if the field schema_float32 was cleared in this mutation.
+func (m *FieldTypeMutation) SchemaFloat32Cleared() bool {
+	_, ok := m.clearedFields[fieldtype.FieldSchemaFloat32]
+	return ok
+}
+
+// ResetSchemaFloat32 reset all changes of the "schema_float32" field.
+func (m *FieldTypeMutation) ResetSchemaFloat32() {
+	m.schema_float32 = nil
+	m.addschema_float32 = nil
+	delete(m.clearedFields, fieldtype.FieldSchemaFloat32)
+}
+
+// SetNullFloat sets the null_float field.
+func (m *FieldTypeMutation) SetNullFloat(sf sql.NullFloat64) {
+	m.null_float = &sf
+}
+
+// NullFloat returns the null_float value in the mutation.
+func (m *FieldTypeMutation) NullFloat() (r sql.NullFloat64, exists bool) {
+	v := m.null_float
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldNullFloat returns the old null_float value of the FieldType.
+// If the FieldType object wasn't provided to the builder, the object is fetched
+// from the database.
+// An error is returned if the mutation operation is not UpdateOne, or database query fails.
+func (m *FieldTypeMutation) OldNullFloat(ctx context.Context) (v sql.NullFloat64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, fmt.Errorf("OldNullFloat is allowed only on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, fmt.Errorf("OldNullFloat requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldNullFloat: %w", err)
+	}
+	return oldValue.NullFloat, nil
+}
+
+// ClearNullFloat clears the value of null_float.
+func (m *FieldTypeMutation) ClearNullFloat() {
+	m.null_float = nil
+	m.clearedFields[fieldtype.FieldNullFloat] = struct{}{}
+}
+
+// NullFloatCleared returns if the field null_float was cleared in this mutation.
+func (m *FieldTypeMutation) NullFloatCleared() bool {
+	_, ok := m.clearedFields[fieldtype.FieldNullFloat]
+	return ok
+}
+
+// ResetNullFloat reset all changes of the "null_float" field.
+func (m *FieldTypeMutation) ResetNullFloat() {
+	m.null_float = nil
+	delete(m.clearedFields, fieldtype.FieldNullFloat)
+}
+
+// SetRole sets the role field.
+func (m *FieldTypeMutation) SetRole(r role.Role) {
+	m.role = &r
+}
+
+// Role returns the role value in the mutation.
+func (m *FieldTypeMutation) Role() (r role.Role, exists bool) {
+	v := m.role
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRole returns the old role value of the FieldType.
+// If the FieldType object wasn't provided to the builder, the object is fetched
+// from the database.
+// An error is returned if the mutation operation is not UpdateOne, or database query fails.
+func (m *FieldTypeMutation) OldRole(ctx context.Context) (v role.Role, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, fmt.Errorf("OldRole is allowed only on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, fmt.Errorf("OldRole requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRole: %w", err)
+	}
+	return oldValue.Role, nil
+}
+
+// ResetRole reset all changes of the "role" field.
+func (m *FieldTypeMutation) ResetRole() {
+	m.role = nil
+}
+
 // Op returns the operation name.
 func (m *FieldTypeMutation) Op() Op {
 	return m.op
@@ -3916,7 +4152,7 @@ func (m *FieldTypeMutation) Type() string {
 // this mutation. Note that, in order to get all numeric
 // fields that were in/decremented, call AddedFields().
 func (m *FieldTypeMutation) Fields() []string {
-	fields := make([]string, 0, 41)
+	fields := make([]string, 0, 45)
 	if m.int != nil {
 		fields = append(fields, fieldtype.FieldInt)
 	}
@@ -4040,6 +4276,18 @@ func (m *FieldTypeMutation) Fields() []string {
 	if m.schema_int64 != nil {
 		fields = append(fields, fieldtype.FieldSchemaInt64)
 	}
+	if m.schema_float != nil {
+		fields = append(fields, fieldtype.FieldSchemaFloat)
+	}
+	if m.schema_float32 != nil {
+		fields = append(fields, fieldtype.FieldSchemaFloat32)
+	}
+	if m.null_float != nil {
+		fields = append(fields, fieldtype.FieldNullFloat)
+	}
+	if m.role != nil {
+		fields = append(fields, fieldtype.FieldRole)
+	}
 	return fields
 }
 
@@ -4130,6 +4378,14 @@ func (m *FieldTypeMutation) Field(name string) (ent.Value, bool) {
 		return m.SchemaInt8()
 	case fieldtype.FieldSchemaInt64:
 		return m.SchemaInt64()
+	case fieldtype.FieldSchemaFloat:
+		return m.SchemaFloat()
+	case fieldtype.FieldSchemaFloat32:
+		return m.SchemaFloat32()
+	case fieldtype.FieldNullFloat:
+		return m.NullFloat()
+	case fieldtype.FieldRole:
+		return m.Role()
 	}
 	return nil, false
 }
@@ -4221,6 +4477,14 @@ func (m *FieldTypeMutation) OldField(ctx context.Context, name string) (ent.Valu
 		return m.OldSchemaInt8(ctx)
 	case fieldtype.FieldSchemaInt64:
 		return m.OldSchemaInt64(ctx)
+	case fieldtype.FieldSchemaFloat:
+		return m.OldSchemaFloat(ctx)
+	case fieldtype.FieldSchemaFloat32:
+		return m.OldSchemaFloat32(ctx)
+	case fieldtype.FieldNullFloat:
+		return m.OldNullFloat(ctx)
+	case fieldtype.FieldRole:
+		return m.OldRole(ctx)
 	}
 	return nil, fmt.Errorf("unknown FieldType field %s", name)
 }
@@ -4517,6 +4781,34 @@ func (m *FieldTypeMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetSchemaInt64(v)
 		return nil
+	case fieldtype.FieldSchemaFloat:
+		v, ok := value.(schema.Float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSchemaFloat(v)
+		return nil
+	case fieldtype.FieldSchemaFloat32:
+		v, ok := value.(schema.Float32)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSchemaFloat32(v)
+		return nil
+	case fieldtype.FieldNullFloat:
+		v, ok := value.(sql.NullFloat64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetNullFloat(v)
+		return nil
+	case fieldtype.FieldRole:
+		v, ok := value.(role.Role)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRole(v)
+		return nil
 	}
 	return fmt.Errorf("unknown FieldType field %s", name)
 }
@@ -4606,6 +4898,12 @@ func (m *FieldTypeMutation) AddedFields() []string {
 	if m.addschema_int64 != nil {
 		fields = append(fields, fieldtype.FieldSchemaInt64)
 	}
+	if m.addschema_float != nil {
+		fields = append(fields, fieldtype.FieldSchemaFloat)
+	}
+	if m.addschema_float32 != nil {
+		fields = append(fields, fieldtype.FieldSchemaFloat32)
+	}
 	return fields
 }
 
@@ -4668,6 +4966,10 @@ func (m *FieldTypeMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedSchemaInt8()
 	case fieldtype.FieldSchemaInt64:
 		return m.AddedSchemaInt64()
+	case fieldtype.FieldSchemaFloat:
+		return m.AddedSchemaFloat()
+	case fieldtype.FieldSchemaFloat32:
+		return m.AddedSchemaFloat32()
 	}
 	return nil, false
 }
@@ -4866,6 +5168,20 @@ func (m *FieldTypeMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddSchemaInt64(v)
 		return nil
+	case fieldtype.FieldSchemaFloat:
+		v, ok := value.(schema.Float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddSchemaFloat(v)
+		return nil
+	case fieldtype.FieldSchemaFloat32:
+		v, ok := value.(schema.Float32)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddSchemaFloat32(v)
+		return nil
 	}
 	return fmt.Errorf("unknown FieldType numeric field %s", name)
 }
@@ -4981,6 +5297,15 @@ func (m *FieldTypeMutation) ClearedFields() []string {
 	}
 	if m.FieldCleared(fieldtype.FieldSchemaInt64) {
 		fields = append(fields, fieldtype.FieldSchemaInt64)
+	}
+	if m.FieldCleared(fieldtype.FieldSchemaFloat) {
+		fields = append(fields, fieldtype.FieldSchemaFloat)
+	}
+	if m.FieldCleared(fieldtype.FieldSchemaFloat32) {
+		fields = append(fields, fieldtype.FieldSchemaFloat32)
+	}
+	if m.FieldCleared(fieldtype.FieldNullFloat) {
+		fields = append(fields, fieldtype.FieldNullFloat)
 	}
 	return fields
 }
@@ -5103,6 +5428,15 @@ func (m *FieldTypeMutation) ClearField(name string) error {
 		return nil
 	case fieldtype.FieldSchemaInt64:
 		m.ClearSchemaInt64()
+		return nil
+	case fieldtype.FieldSchemaFloat:
+		m.ClearSchemaFloat()
+		return nil
+	case fieldtype.FieldSchemaFloat32:
+		m.ClearSchemaFloat32()
+		return nil
+	case fieldtype.FieldNullFloat:
+		m.ClearNullFloat()
 		return nil
 	}
 	return fmt.Errorf("unknown FieldType nullable field %s", name)
@@ -5235,6 +5569,18 @@ func (m *FieldTypeMutation) ResetField(name string) error {
 		return nil
 	case fieldtype.FieldSchemaInt64:
 		m.ResetSchemaInt64()
+		return nil
+	case fieldtype.FieldSchemaFloat:
+		m.ResetSchemaFloat()
+		return nil
+	case fieldtype.FieldSchemaFloat32:
+		m.ResetSchemaFloat32()
+		return nil
+	case fieldtype.FieldNullFloat:
+		m.ResetNullFloat()
+		return nil
+	case fieldtype.FieldRole:
+		m.ResetRole()
 		return nil
 	}
 	return fmt.Errorf("unknown FieldType field %s", name)
@@ -6028,6 +6374,8 @@ type FileTypeMutation struct {
 	typ           string
 	id            *string
 	name          *string
+	_type         *filetype.Type
+	state         *filetype.State
 	clearedFields map[string]struct{}
 	files         map[string]struct{}
 	removedfiles  map[string]struct{}
@@ -6151,6 +6499,80 @@ func (m *FileTypeMutation) ResetName() {
 	m.name = nil
 }
 
+// SetType sets the type field.
+func (m *FileTypeMutation) SetType(f filetype.Type) {
+	m._type = &f
+}
+
+// GetType returns the type value in the mutation.
+func (m *FileTypeMutation) GetType() (r filetype.Type, exists bool) {
+	v := m._type
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldType returns the old type value of the FileType.
+// If the FileType object wasn't provided to the builder, the object is fetched
+// from the database.
+// An error is returned if the mutation operation is not UpdateOne, or database query fails.
+func (m *FileTypeMutation) OldType(ctx context.Context) (v filetype.Type, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, fmt.Errorf("OldType is allowed only on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, fmt.Errorf("OldType requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldType: %w", err)
+	}
+	return oldValue.Type, nil
+}
+
+// ResetType reset all changes of the "type" field.
+func (m *FileTypeMutation) ResetType() {
+	m._type = nil
+}
+
+// SetState sets the state field.
+func (m *FileTypeMutation) SetState(f filetype.State) {
+	m.state = &f
+}
+
+// State returns the state value in the mutation.
+func (m *FileTypeMutation) State() (r filetype.State, exists bool) {
+	v := m.state
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldState returns the old state value of the FileType.
+// If the FileType object wasn't provided to the builder, the object is fetched
+// from the database.
+// An error is returned if the mutation operation is not UpdateOne, or database query fails.
+func (m *FileTypeMutation) OldState(ctx context.Context) (v filetype.State, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, fmt.Errorf("OldState is allowed only on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, fmt.Errorf("OldState requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldState: %w", err)
+	}
+	return oldValue.State, nil
+}
+
+// ResetState reset all changes of the "state" field.
+func (m *FileTypeMutation) ResetState() {
+	m.state = nil
+}
+
 // AddFileIDs adds the files edge to File by ids.
 func (m *FileTypeMutation) AddFileIDs(ids ...string) {
 	if m.files == nil {
@@ -6207,9 +6629,15 @@ func (m *FileTypeMutation) Type() string {
 // this mutation. Note that, in order to get all numeric
 // fields that were in/decremented, call AddedFields().
 func (m *FileTypeMutation) Fields() []string {
-	fields := make([]string, 0, 1)
+	fields := make([]string, 0, 3)
 	if m.name != nil {
 		fields = append(fields, filetype.FieldName)
+	}
+	if m._type != nil {
+		fields = append(fields, filetype.FieldType)
+	}
+	if m.state != nil {
+		fields = append(fields, filetype.FieldState)
 	}
 	return fields
 }
@@ -6221,6 +6649,10 @@ func (m *FileTypeMutation) Field(name string) (ent.Value, bool) {
 	switch name {
 	case filetype.FieldName:
 		return m.Name()
+	case filetype.FieldType:
+		return m.GetType()
+	case filetype.FieldState:
+		return m.State()
 	}
 	return nil, false
 }
@@ -6232,6 +6664,10 @@ func (m *FileTypeMutation) OldField(ctx context.Context, name string) (ent.Value
 	switch name {
 	case filetype.FieldName:
 		return m.OldName(ctx)
+	case filetype.FieldType:
+		return m.OldType(ctx)
+	case filetype.FieldState:
+		return m.OldState(ctx)
 	}
 	return nil, fmt.Errorf("unknown FileType field %s", name)
 }
@@ -6247,6 +6683,20 @@ func (m *FileTypeMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetName(v)
+		return nil
+	case filetype.FieldType:
+		v, ok := value.(filetype.Type)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetType(v)
+		return nil
+	case filetype.FieldState:
+		v, ok := value.(filetype.State)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetState(v)
 		return nil
 	}
 	return fmt.Errorf("unknown FileType field %s", name)
@@ -6300,6 +6750,12 @@ func (m *FileTypeMutation) ResetField(name string) error {
 	switch name {
 	case filetype.FieldName:
 		m.ResetName()
+		return nil
+	case filetype.FieldType:
+		m.ResetType()
+		return nil
+	case filetype.FieldState:
+		m.ResetState()
 		return nil
 	}
 	return fmt.Errorf("unknown FileType field %s", name)

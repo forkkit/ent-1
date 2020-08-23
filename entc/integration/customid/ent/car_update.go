@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -10,12 +10,12 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/facebookincubator/ent/dialect/sql"
-	"github.com/facebookincubator/ent/dialect/sql/sqlgraph"
-	"github.com/facebookincubator/ent/entc/integration/customid/ent/car"
-	"github.com/facebookincubator/ent/entc/integration/customid/ent/pet"
-	"github.com/facebookincubator/ent/entc/integration/customid/ent/predicate"
-	"github.com/facebookincubator/ent/schema/field"
+	"github.com/facebook/ent/dialect/sql"
+	"github.com/facebook/ent/dialect/sql/sqlgraph"
+	"github.com/facebook/ent/entc/integration/customid/ent/car"
+	"github.com/facebook/ent/entc/integration/customid/ent/pet"
+	"github.com/facebook/ent/entc/integration/customid/ent/predicate"
+	"github.com/facebook/ent/schema/field"
 )
 
 // CarUpdate is the builder for updating Car entities.
@@ -126,12 +126,12 @@ func (cu *CarUpdate) ClearOwner() *CarUpdate {
 func (cu *CarUpdate) Save(ctx context.Context) (int, error) {
 	if v, ok := cu.mutation.BeforeID(); ok {
 		if err := car.BeforeIDValidator(v); err != nil {
-			return 0, fmt.Errorf("ent: validator failed for field \"before_id\": %w", err)
+			return 0, &ValidationError{Name: "before_id", err: fmt.Errorf("ent: validator failed for field \"before_id\": %w", err)}
 		}
 	}
 	if v, ok := cu.mutation.AfterID(); ok {
 		if err := car.AfterIDValidator(v); err != nil {
-			return 0, fmt.Errorf("ent: validator failed for field \"after_id\": %w", err)
+			return 0, &ValidationError{Name: "after_id", err: fmt.Errorf("ent: validator failed for field \"after_id\": %w", err)}
 		}
 	}
 
@@ -396,12 +396,12 @@ func (cuo *CarUpdateOne) ClearOwner() *CarUpdateOne {
 func (cuo *CarUpdateOne) Save(ctx context.Context) (*Car, error) {
 	if v, ok := cuo.mutation.BeforeID(); ok {
 		if err := car.BeforeIDValidator(v); err != nil {
-			return nil, fmt.Errorf("ent: validator failed for field \"before_id\": %w", err)
+			return nil, &ValidationError{Name: "before_id", err: fmt.Errorf("ent: validator failed for field \"before_id\": %w", err)}
 		}
 	}
 	if v, ok := cuo.mutation.AfterID(); ok {
 		if err := car.AfterIDValidator(v); err != nil {
-			return nil, fmt.Errorf("ent: validator failed for field \"after_id\": %w", err)
+			return nil, &ValidationError{Name: "after_id", err: fmt.Errorf("ent: validator failed for field \"after_id\": %w", err)}
 		}
 	}
 
@@ -467,7 +467,7 @@ func (cuo *CarUpdateOne) sqlSave(ctx context.Context) (c *Car, err error) {
 	}
 	id, ok := cuo.mutation.ID()
 	if !ok {
-		return nil, fmt.Errorf("missing Car.ID for update")
+		return nil, &ValidationError{Name: "ID", err: fmt.Errorf("missing Car.ID for update")}
 	}
 	_spec.Node.ID.Value = id
 	if value, ok := cuo.mutation.BeforeID(); ok {

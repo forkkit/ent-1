@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -11,10 +11,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/facebookincubator/ent"
-	"github.com/facebookincubator/ent/dialect"
-	"github.com/facebookincubator/ent/dialect/sql"
-	"github.com/facebookincubator/ent/dialect/sql/sqlgraph"
+	"github.com/facebook/ent"
+	"github.com/facebook/ent/dialect"
+	"github.com/facebook/ent/dialect/sql"
+	"github.com/facebook/ent/dialect/sql/sqlgraph"
 )
 
 // ent aliases to avoid import conflict in user's code.
@@ -98,6 +98,31 @@ func Sum(field string) AggregateFunc {
 	return func(s *sql.Selector) string {
 		return sql.Sum(s.C(field))
 	}
+}
+
+// ValidationError returns when validating a field fails.
+type ValidationError struct {
+	Name string // Field or edge name.
+	err  error
+}
+
+// Error implements the error interface.
+func (e *ValidationError) Error() string {
+	return e.err.Error()
+}
+
+// Unwrap implements the errors.Wrapper interface.
+func (e *ValidationError) Unwrap() error {
+	return errors.Unwrap(e.err)
+}
+
+// IsValidationError returns a boolean indicating whether the error is a validaton error.
+func IsValidationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var e *ValidationError
+	return errors.As(err, &e)
 }
 
 // NotFoundError returns when trying to fetch a specific entity and it was not found in the database.

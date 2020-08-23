@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -13,12 +13,13 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/facebookincubator/ent/dialect/sql"
-	"github.com/facebookincubator/ent/dialect/sql/sqlgraph"
-	"github.com/facebookincubator/ent/entc/integration/ent/fieldtype"
-	"github.com/facebookincubator/ent/entc/integration/ent/predicate"
-	"github.com/facebookincubator/ent/entc/integration/ent/schema"
-	"github.com/facebookincubator/ent/schema/field"
+	"github.com/facebook/ent/dialect/sql"
+	"github.com/facebook/ent/dialect/sql/sqlgraph"
+	"github.com/facebook/ent/entc/integration/ent/fieldtype"
+	"github.com/facebook/ent/entc/integration/ent/predicate"
+	"github.com/facebook/ent/entc/integration/ent/role"
+	"github.com/facebook/ent/entc/integration/ent/schema"
+	"github.com/facebook/ent/schema/field"
 )
 
 // FieldTypeUpdate is the builder for updating FieldType entities.
@@ -978,6 +979,20 @@ func (ftu *FieldTypeUpdate) ClearNullFloat() *FieldTypeUpdate {
 	return ftu
 }
 
+// SetRole sets the role field.
+func (ftu *FieldTypeUpdate) SetRole(r role.Role) *FieldTypeUpdate {
+	ftu.mutation.SetRole(r)
+	return ftu
+}
+
+// SetNillableRole sets the role field if the given value is not nil.
+func (ftu *FieldTypeUpdate) SetNillableRole(r *role.Role) *FieldTypeUpdate {
+	if r != nil {
+		ftu.SetRole(*r)
+	}
+	return ftu
+}
+
 // Mutation returns the FieldTypeMutation object of the builder.
 func (ftu *FieldTypeUpdate) Mutation() *FieldTypeMutation {
 	return ftu.mutation
@@ -987,12 +1002,27 @@ func (ftu *FieldTypeUpdate) Mutation() *FieldTypeMutation {
 func (ftu *FieldTypeUpdate) Save(ctx context.Context) (int, error) {
 	if v, ok := ftu.mutation.ValidateOptionalInt32(); ok {
 		if err := fieldtype.ValidateOptionalInt32Validator(v); err != nil {
-			return 0, fmt.Errorf("ent: validator failed for field \"validate_optional_int32\": %w", err)
+			return 0, &ValidationError{Name: "validate_optional_int32", err: fmt.Errorf("ent: validator failed for field \"validate_optional_int32\": %w", err)}
 		}
 	}
 	if v, ok := ftu.mutation.State(); ok {
 		if err := fieldtype.StateValidator(v); err != nil {
-			return 0, fmt.Errorf("ent: validator failed for field \"state\": %w", err)
+			return 0, &ValidationError{Name: "state", err: fmt.Errorf("ent: validator failed for field \"state\": %w", err)}
+		}
+	}
+	if v, ok := ftu.mutation.Ndir(); ok {
+		if err := fieldtype.NdirValidator(string(v)); err != nil {
+			return 0, &ValidationError{Name: "ndir", err: fmt.Errorf("ent: validator failed for field \"ndir\": %w", err)}
+		}
+	}
+	if v, ok := ftu.mutation.Link(); ok {
+		if err := fieldtype.LinkValidator(v.String()); err != nil {
+			return 0, &ValidationError{Name: "link", err: fmt.Errorf("ent: validator failed for field \"link\": %w", err)}
+		}
+	}
+	if v, ok := ftu.mutation.Role(); ok {
+		if err := fieldtype.RoleValidator(v); err != nil {
+			return 0, &ValidationError{Name: "role", err: fmt.Errorf("ent: validator failed for field \"role\": %w", err)}
 		}
 	}
 	var (
@@ -1805,6 +1835,13 @@ func (ftu *FieldTypeUpdate) sqlSave(ctx context.Context) (n int, err error) {
 		_spec.Fields.Clear = append(_spec.Fields.Clear, &sqlgraph.FieldSpec{
 			Type:   field.TypeFloat64,
 			Column: fieldtype.FieldNullFloat,
+		})
+	}
+	if value, ok := ftu.mutation.Role(); ok {
+		_spec.Fields.Set = append(_spec.Fields.Set, &sqlgraph.FieldSpec{
+			Type:   field.TypeEnum,
+			Value:  value,
+			Column: fieldtype.FieldRole,
 		})
 	}
 	if n, err = sqlgraph.UpdateNodes(ctx, ftu.driver, _spec); err != nil {
@@ -2768,6 +2805,20 @@ func (ftuo *FieldTypeUpdateOne) ClearNullFloat() *FieldTypeUpdateOne {
 	return ftuo
 }
 
+// SetRole sets the role field.
+func (ftuo *FieldTypeUpdateOne) SetRole(r role.Role) *FieldTypeUpdateOne {
+	ftuo.mutation.SetRole(r)
+	return ftuo
+}
+
+// SetNillableRole sets the role field if the given value is not nil.
+func (ftuo *FieldTypeUpdateOne) SetNillableRole(r *role.Role) *FieldTypeUpdateOne {
+	if r != nil {
+		ftuo.SetRole(*r)
+	}
+	return ftuo
+}
+
 // Mutation returns the FieldTypeMutation object of the builder.
 func (ftuo *FieldTypeUpdateOne) Mutation() *FieldTypeMutation {
 	return ftuo.mutation
@@ -2777,12 +2828,27 @@ func (ftuo *FieldTypeUpdateOne) Mutation() *FieldTypeMutation {
 func (ftuo *FieldTypeUpdateOne) Save(ctx context.Context) (*FieldType, error) {
 	if v, ok := ftuo.mutation.ValidateOptionalInt32(); ok {
 		if err := fieldtype.ValidateOptionalInt32Validator(v); err != nil {
-			return nil, fmt.Errorf("ent: validator failed for field \"validate_optional_int32\": %w", err)
+			return nil, &ValidationError{Name: "validate_optional_int32", err: fmt.Errorf("ent: validator failed for field \"validate_optional_int32\": %w", err)}
 		}
 	}
 	if v, ok := ftuo.mutation.State(); ok {
 		if err := fieldtype.StateValidator(v); err != nil {
-			return nil, fmt.Errorf("ent: validator failed for field \"state\": %w", err)
+			return nil, &ValidationError{Name: "state", err: fmt.Errorf("ent: validator failed for field \"state\": %w", err)}
+		}
+	}
+	if v, ok := ftuo.mutation.Ndir(); ok {
+		if err := fieldtype.NdirValidator(string(v)); err != nil {
+			return nil, &ValidationError{Name: "ndir", err: fmt.Errorf("ent: validator failed for field \"ndir\": %w", err)}
+		}
+	}
+	if v, ok := ftuo.mutation.Link(); ok {
+		if err := fieldtype.LinkValidator(v.String()); err != nil {
+			return nil, &ValidationError{Name: "link", err: fmt.Errorf("ent: validator failed for field \"link\": %w", err)}
+		}
+	}
+	if v, ok := ftuo.mutation.Role(); ok {
+		if err := fieldtype.RoleValidator(v); err != nil {
+			return nil, &ValidationError{Name: "role", err: fmt.Errorf("ent: validator failed for field \"role\": %w", err)}
 		}
 	}
 	var (
@@ -2847,7 +2913,7 @@ func (ftuo *FieldTypeUpdateOne) sqlSave(ctx context.Context) (ft *FieldType, err
 	}
 	id, ok := ftuo.mutation.ID()
 	if !ok {
-		return nil, fmt.Errorf("missing FieldType.ID for update")
+		return nil, &ValidationError{Name: "ID", err: fmt.Errorf("missing FieldType.ID for update")}
 	}
 	_spec.Node.ID.Value = id
 	if value, ok := ftuo.mutation.Int(); ok {
@@ -3593,6 +3659,13 @@ func (ftuo *FieldTypeUpdateOne) sqlSave(ctx context.Context) (ft *FieldType, err
 		_spec.Fields.Clear = append(_spec.Fields.Clear, &sqlgraph.FieldSpec{
 			Type:   field.TypeFloat64,
 			Column: fieldtype.FieldNullFloat,
+		})
+	}
+	if value, ok := ftuo.mutation.Role(); ok {
+		_spec.Fields.Set = append(_spec.Fields.Set, &sqlgraph.FieldSpec{
+			Type:   field.TypeEnum,
+			Value:  value,
+			Column: fieldtype.FieldRole,
 		})
 	}
 	ft = &FieldType{config: ftuo.config}

@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -9,13 +9,13 @@ package ent
 import (
 	"time"
 
-	"github.com/facebookincubator/ent/entc/integration/ent/schema"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/card"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/fieldtype"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/file"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/group"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/groupinfo"
-	"github.com/facebookincubator/ent/entc/integration/gremlin/ent/user"
+	"github.com/facebook/ent/entc/integration/ent/schema"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/card"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/fieldtype"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/file"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/group"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/groupinfo"
+	"github.com/facebook/ent/entc/integration/gremlin/ent/user"
 )
 
 // The init function reads all schema descriptors with runtime
@@ -50,6 +50,14 @@ func init() {
 	fieldtypeDescValidateOptionalInt32 := fieldtypeFields[15].Descriptor()
 	// fieldtype.ValidateOptionalInt32Validator is a validator for the "validate_optional_int32" field. It is called by the builders before save.
 	fieldtype.ValidateOptionalInt32Validator = fieldtypeDescValidateOptionalInt32.Validators[0].(func(int32) error)
+	// fieldtypeDescNdir is the schema descriptor for ndir field.
+	fieldtypeDescNdir := fieldtypeFields[27].Descriptor()
+	// fieldtype.NdirValidator is a validator for the "ndir" field. It is called by the builders before save.
+	fieldtype.NdirValidator = fieldtypeDescNdir.Validators[0].(func(string) error)
+	// fieldtypeDescLink is the schema descriptor for link field.
+	fieldtypeDescLink := fieldtypeFields[30].Descriptor()
+	// fieldtype.LinkValidator is a validator for the "link" field. It is called by the builders before save.
+	fieldtype.LinkValidator = fieldtypeDescLink.Validators[0].(func(string) error)
 	fileFields := schema.File{}.Fields()
 	_ = fileFields
 	// fileDescSize is the schema descriptor for size field.
@@ -58,6 +66,8 @@ func init() {
 	file.DefaultSize = fileDescSize.Default.(int)
 	// file.SizeValidator is a validator for the "size" field. It is called by the builders before save.
 	file.SizeValidator = fileDescSize.Validators[0].(func(int) error)
+	filetypeFields := schema.FileType{}.Fields()
+	_ = filetypeFields
 	groupFields := schema.Group{}.Fields()
 	_ = groupFields
 	// groupDescActive is the schema descriptor for active field.

@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -7,7 +7,7 @@
 package planet
 
 import (
-	"github.com/facebookincubator/ent"
+	"github.com/facebook/ent"
 )
 
 const (
@@ -51,7 +51,7 @@ var (
 // package on the initialization of the application. Therefore,
 // it should be imported in the main as follows:
 //
-//	import _ "github.com/facebookincubator/ent/entc/integration/privacy/ent/runtime"
+//	import _ "github.com/facebook/ent/entc/integration/privacy/ent/runtime"
 //
 var (
 	Hooks  [2]ent.Hook

@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -10,7 +10,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/facebookincubator/ent/entc/integration/migrate/entv2"
+	"github.com/facebook/ent/entc/integration/migrate/entv2"
 )
 
 // The CarFunc type is an adapter to allow the use of ordinary
@@ -65,19 +65,127 @@ func (f UserFunc) Mutate(ctx context.Context, m entv2.Mutation) (entv2.Value, er
 	return f(ctx, mv)
 }
 
-// On executes the given hook only of the given operation.
+// Condition is a hook condition function.
+type Condition func(context.Context, entv2.Mutation) bool
+
+// And groups conditions with the AND operator.
+func And(first, second Condition, rest ...Condition) Condition {
+	return func(ctx context.Context, m entv2.Mutation) bool {
+		if !first(ctx, m) || !second(ctx, m) {
+			return false
+		}
+		for _, cond := range rest {
+			if !cond(ctx, m) {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+// Or groups conditions with the OR operator.
+func Or(first, second Condition, rest ...Condition) Condition {
+	return func(ctx context.Context, m entv2.Mutation) bool {
+		if first(ctx, m) || second(ctx, m) {
+			return true
+		}
+		for _, cond := range rest {
+			if cond(ctx, m) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// Not negates a given condition.
+func Not(cond Condition) Condition {
+	return func(ctx context.Context, m entv2.Mutation) bool {
+		return !cond(ctx, m)
+	}
+}
+
+// HasOp is a condition testing mutation operation.
+func HasOp(op entv2.Op) Condition {
+	return func(_ context.Context, m entv2.Mutation) bool {
+		return m.Op().Is(op)
+	}
+}
+
+// HasAddedFields is a condition validating `.AddedField` on fields.
+func HasAddedFields(field string, fields ...string) Condition {
+	return func(_ context.Context, m entv2.Mutation) bool {
+		if _, exists := m.AddedField(field); !exists {
+			return false
+		}
+		for _, field := range fields {
+			if _, exists := m.AddedField(field); !exists {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+// HasClearedFields is a condition validating `.FieldCleared` on fields.
+func HasClearedFields(field string, fields ...string) Condition {
+	return func(_ context.Context, m entv2.Mutation) bool {
+		if exists := m.FieldCleared(field); !exists {
+			return false
+		}
+		for _, field := range fields {
+			if exists := m.FieldCleared(field); !exists {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+// HasFields is a condition validating `.Field` on fields.
+func HasFields(field string, fields ...string) Condition {
+	return func(_ context.Context, m entv2.Mutation) bool {
+		if _, exists := m.Field(field); !exists {
+			return false
+		}
+		for _, field := range fields {
+			if _, exists := m.Field(field); !exists {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+// If executes the given hook under condition.
 //
-//	hook.On(Log, entv2.Delete|entv2.Create)
+//	Hook.If(ComputeAverage, And(HasFields(...), HasAddedFields(...)))
 //
-func On(hk entv2.Hook, op entv2.Op) entv2.Hook {
+func If(hk entv2.Hook, cond Condition) entv2.Hook {
 	return func(next entv2.Mutator) entv2.Mutator {
 		return entv2.MutateFunc(func(ctx context.Context, m entv2.Mutation) (entv2.Value, error) {
-			if m.Op().Is(op) {
+			if cond(ctx, m) {
 				return hk(next).Mutate(ctx, m)
 			}
 			return next.Mutate(ctx, m)
 		})
 	}
+}
+
+// On executes the given hook only for the given operation.
+//
+//	hook.On(Log, entv2.Delete|entv2.Create)
+//
+func On(hk entv2.Hook, op entv2.Op) entv2.Hook {
+	return If(hk, HasOp(op))
+}
+
+// Unless skips the given hook only for the given operation.
+//
+//	hook.Unless(Log, entv2.Update|entv2.UpdateOne)
+//
+func Unless(hk entv2.Hook, op entv2.Op) entv2.Hook {
+	return If(hk, Not(HasOp(op)))
 }
 
 // Reject returns a hook that rejects all operations that match op.
@@ -89,14 +197,12 @@ func On(hk entv2.Hook, op entv2.Op) entv2.Hook {
 //	}
 //
 func Reject(op entv2.Op) entv2.Hook {
-	return func(next entv2.Mutator) entv2.Mutator {
-		return entv2.MutateFunc(func(ctx context.Context, m entv2.Mutation) (entv2.Value, error) {
-			if m.Op().Is(op) {
-				return nil, fmt.Errorf("%s operation is not allowed", m.Op())
-			}
-			return next.Mutate(ctx, m)
+	hk := func(entv2.Mutator) entv2.Mutator {
+		return entv2.MutateFunc(func(_ context.Context, m entv2.Mutation) (entv2.Value, error) {
+			return nil, fmt.Errorf("%s operation is not allowed", m.Op())
 		})
 	}
+	return On(hk, op)
 }
 
 // Chain acts as a list of hooks and is effectively immutable.

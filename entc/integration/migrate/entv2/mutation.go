@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -11,10 +11,11 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/facebookincubator/ent/entc/integration/migrate/entv2/car"
-	"github.com/facebookincubator/ent/entc/integration/migrate/entv2/user"
+	"github.com/facebook/ent/entc/integration/migrate/entv2/car"
+	"github.com/facebook/ent/entc/integration/migrate/entv2/pet"
+	"github.com/facebook/ent/entc/integration/migrate/entv2/user"
 
-	"github.com/facebookincubator/ent"
+	"github.com/facebook/ent"
 )
 
 const (
@@ -569,6 +570,8 @@ type PetMutation struct {
 	typ           string
 	id            *int
 	clearedFields map[string]struct{}
+	owner         *int
+	clearedowner  bool
 	done          bool
 	oldValue      func(context.Context) (*Pet, error)
 }
@@ -650,6 +653,45 @@ func (m *PetMutation) ID() (id int, exists bool) {
 		return
 	}
 	return *m.id, true
+}
+
+// SetOwnerID sets the owner edge to User by id.
+func (m *PetMutation) SetOwnerID(id int) {
+	m.owner = &id
+}
+
+// ClearOwner clears the owner edge to User.
+func (m *PetMutation) ClearOwner() {
+	m.clearedowner = true
+}
+
+// OwnerCleared returns if the edge owner was cleared.
+func (m *PetMutation) OwnerCleared() bool {
+	return m.clearedowner
+}
+
+// OwnerID returns the owner id in the mutation.
+func (m *PetMutation) OwnerID() (id int, exists bool) {
+	if m.owner != nil {
+		return *m.owner, true
+	}
+	return
+}
+
+// OwnerIDs returns the owner ids in the mutation.
+// Note that ids always returns len(ids) <= 1 for unique edges, and you should use
+// OwnerID instead. It exists only for internal usage by the builders.
+func (m *PetMutation) OwnerIDs() (ids []int) {
+	if id := m.owner; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetOwner reset all changes of the "owner" edge.
+func (m *PetMutation) ResetOwner() {
+	m.owner = nil
+	m.clearedowner = false
 }
 
 // Op returns the operation name.
@@ -742,45 +784,68 @@ func (m *PetMutation) ResetField(name string) error {
 // AddedEdges returns all edge names that were set/added in this
 // mutation.
 func (m *PetMutation) AddedEdges() []string {
-	edges := make([]string, 0, 0)
+	edges := make([]string, 0, 1)
+	if m.owner != nil {
+		edges = append(edges, pet.EdgeOwner)
+	}
 	return edges
 }
 
 // AddedIDs returns all ids (to other nodes) that were added for
 // the given edge name.
 func (m *PetMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case pet.EdgeOwner:
+		if id := m.owner; id != nil {
+			return []ent.Value{*id}
+		}
+	}
 	return nil
 }
 
 // RemovedEdges returns all edge names that were removed in this
 // mutation.
 func (m *PetMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 0)
+	edges := make([]string, 0, 1)
 	return edges
 }
 
 // RemovedIDs returns all ids (to other nodes) that were removed for
 // the given edge name.
 func (m *PetMutation) RemovedIDs(name string) []ent.Value {
+	switch name {
+	}
 	return nil
 }
 
 // ClearedEdges returns all edge names that were cleared in this
 // mutation.
 func (m *PetMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 0)
+	edges := make([]string, 0, 1)
+	if m.clearedowner {
+		edges = append(edges, pet.EdgeOwner)
+	}
 	return edges
 }
 
 // EdgeCleared returns a boolean indicates if this edge was
 // cleared in this mutation.
 func (m *PetMutation) EdgeCleared(name string) bool {
+	switch name {
+	case pet.EdgeOwner:
+		return m.clearedowner
+	}
 	return false
 }
 
 // ClearEdge clears the value for the given name. It returns an
 // error if the edge name is not defined in the schema.
 func (m *PetMutation) ClearEdge(name string) error {
+	switch name {
+	case pet.EdgeOwner:
+		m.ClearOwner()
+		return nil
+	}
 	return fmt.Errorf("unknown Pet unique edge %s", name)
 }
 
@@ -788,6 +853,11 @@ func (m *PetMutation) ClearEdge(name string) error {
 // given edge name. It returns an error if the edge is not
 // defined in the schema.
 func (m *PetMutation) ResetEdge(name string) error {
+	switch name {
+	case pet.EdgeOwner:
+		m.ResetOwner()
+		return nil
+	}
 	return fmt.Errorf("unknown Pet edge %s", name)
 }
 
@@ -795,26 +865,31 @@ func (m *PetMutation) ResetEdge(name string) error {
 // nodes in the graph.
 type UserMutation struct {
 	config
-	op            Op
-	typ           string
-	id            *int
-	age           *int
-	addage        *int
-	name          *string
-	nickname      *string
-	phone         *string
-	buffer        *[]byte
-	title         *string
-	new_name      *string
-	blob          *[]byte
-	state         *user.State
-	clearedFields map[string]struct{}
-	car           map[int]struct{}
-	removedcar    map[int]struct{}
-	pets          *int
-	clearedpets   bool
-	done          bool
-	oldValue      func(context.Context) (*User, error)
+	op             Op
+	typ            string
+	id             *int
+	mixed_string   *string
+	mixed_enum     *user.MixedEnum
+	age            *int
+	addage         *int
+	name           *string
+	nickname       *string
+	phone          *string
+	buffer         *[]byte
+	title          *string
+	new_name       *string
+	blob           *[]byte
+	state          *user.State
+	status         *user.Status
+	clearedFields  map[string]struct{}
+	car            map[int]struct{}
+	removedcar     map[int]struct{}
+	pets           *int
+	clearedpets    bool
+	friends        map[int]struct{}
+	removedfriends map[int]struct{}
+	done           bool
+	oldValue       func(context.Context) (*User, error)
 }
 
 var _ ent.Mutation = (*UserMutation)(nil)
@@ -900,6 +975,80 @@ func (m *UserMutation) ID() (id int, exists bool) {
 		return
 	}
 	return *m.id, true
+}
+
+// SetMixedString sets the mixed_string field.
+func (m *UserMutation) SetMixedString(s string) {
+	m.mixed_string = &s
+}
+
+// MixedString returns the mixed_string value in the mutation.
+func (m *UserMutation) MixedString() (r string, exists bool) {
+	v := m.mixed_string
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMixedString returns the old mixed_string value of the User.
+// If the User object wasn't provided to the builder, the object is fetched
+// from the database.
+// An error is returned if the mutation operation is not UpdateOne, or database query fails.
+func (m *UserMutation) OldMixedString(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, fmt.Errorf("OldMixedString is allowed only on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, fmt.Errorf("OldMixedString requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMixedString: %w", err)
+	}
+	return oldValue.MixedString, nil
+}
+
+// ResetMixedString reset all changes of the "mixed_string" field.
+func (m *UserMutation) ResetMixedString() {
+	m.mixed_string = nil
+}
+
+// SetMixedEnum sets the mixed_enum field.
+func (m *UserMutation) SetMixedEnum(ue user.MixedEnum) {
+	m.mixed_enum = &ue
+}
+
+// MixedEnum returns the mixed_enum value in the mutation.
+func (m *UserMutation) MixedEnum() (r user.MixedEnum, exists bool) {
+	v := m.mixed_enum
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMixedEnum returns the old mixed_enum value of the User.
+// If the User object wasn't provided to the builder, the object is fetched
+// from the database.
+// An error is returned if the mutation operation is not UpdateOne, or database query fails.
+func (m *UserMutation) OldMixedEnum(ctx context.Context) (v user.MixedEnum, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, fmt.Errorf("OldMixedEnum is allowed only on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, fmt.Errorf("OldMixedEnum requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMixedEnum: %w", err)
+	}
+	return oldValue.MixedEnum, nil
+}
+
+// ResetMixedEnum reset all changes of the "mixed_enum" field.
+func (m *UserMutation) ResetMixedEnum() {
+	m.mixed_enum = nil
 }
 
 // SetAge sets the age field.
@@ -1307,6 +1456,56 @@ func (m *UserMutation) ResetState() {
 	delete(m.clearedFields, user.FieldState)
 }
 
+// SetStatus sets the status field.
+func (m *UserMutation) SetStatus(u user.Status) {
+	m.status = &u
+}
+
+// Status returns the status value in the mutation.
+func (m *UserMutation) Status() (r user.Status, exists bool) {
+	v := m.status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStatus returns the old status value of the User.
+// If the User object wasn't provided to the builder, the object is fetched
+// from the database.
+// An error is returned if the mutation operation is not UpdateOne, or database query fails.
+func (m *UserMutation) OldStatus(ctx context.Context) (v user.Status, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, fmt.Errorf("OldStatus is allowed only on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, fmt.Errorf("OldStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStatus: %w", err)
+	}
+	return oldValue.Status, nil
+}
+
+// ClearStatus clears the value of status.
+func (m *UserMutation) ClearStatus() {
+	m.status = nil
+	m.clearedFields[user.FieldStatus] = struct{}{}
+}
+
+// StatusCleared returns if the field status was cleared in this mutation.
+func (m *UserMutation) StatusCleared() bool {
+	_, ok := m.clearedFields[user.FieldStatus]
+	return ok
+}
+
+// ResetStatus reset all changes of the "status" field.
+func (m *UserMutation) ResetStatus() {
+	m.status = nil
+	delete(m.clearedFields, user.FieldStatus)
+}
+
 // AddCarIDs adds the car edge to Car by ids.
 func (m *UserMutation) AddCarIDs(ids ...int) {
 	if m.car == nil {
@@ -1388,6 +1587,48 @@ func (m *UserMutation) ResetPets() {
 	m.clearedpets = false
 }
 
+// AddFriendIDs adds the friends edge to User by ids.
+func (m *UserMutation) AddFriendIDs(ids ...int) {
+	if m.friends == nil {
+		m.friends = make(map[int]struct{})
+	}
+	for i := range ids {
+		m.friends[ids[i]] = struct{}{}
+	}
+}
+
+// RemoveFriendIDs removes the friends edge to User by ids.
+func (m *UserMutation) RemoveFriendIDs(ids ...int) {
+	if m.removedfriends == nil {
+		m.removedfriends = make(map[int]struct{})
+	}
+	for i := range ids {
+		m.removedfriends[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedFriends returns the removed ids of friends.
+func (m *UserMutation) RemovedFriendsIDs() (ids []int) {
+	for id := range m.removedfriends {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// FriendsIDs returns the friends ids in the mutation.
+func (m *UserMutation) FriendsIDs() (ids []int) {
+	for id := range m.friends {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetFriends reset all changes of the "friends" edge.
+func (m *UserMutation) ResetFriends() {
+	m.friends = nil
+	m.removedfriends = nil
+}
+
 // Op returns the operation name.
 func (m *UserMutation) Op() Op {
 	return m.op
@@ -1402,7 +1643,13 @@ func (m *UserMutation) Type() string {
 // this mutation. Note that, in order to get all numeric
 // fields that were in/decremented, call AddedFields().
 func (m *UserMutation) Fields() []string {
-	fields := make([]string, 0, 9)
+	fields := make([]string, 0, 12)
+	if m.mixed_string != nil {
+		fields = append(fields, user.FieldMixedString)
+	}
+	if m.mixed_enum != nil {
+		fields = append(fields, user.FieldMixedEnum)
+	}
 	if m.age != nil {
 		fields = append(fields, user.FieldAge)
 	}
@@ -1430,6 +1677,9 @@ func (m *UserMutation) Fields() []string {
 	if m.state != nil {
 		fields = append(fields, user.FieldState)
 	}
+	if m.status != nil {
+		fields = append(fields, user.FieldStatus)
+	}
 	return fields
 }
 
@@ -1438,6 +1688,10 @@ func (m *UserMutation) Fields() []string {
 // not set, or was not define in the schema.
 func (m *UserMutation) Field(name string) (ent.Value, bool) {
 	switch name {
+	case user.FieldMixedString:
+		return m.MixedString()
+	case user.FieldMixedEnum:
+		return m.MixedEnum()
 	case user.FieldAge:
 		return m.Age()
 	case user.FieldName:
@@ -1456,6 +1710,8 @@ func (m *UserMutation) Field(name string) (ent.Value, bool) {
 		return m.Blob()
 	case user.FieldState:
 		return m.State()
+	case user.FieldStatus:
+		return m.Status()
 	}
 	return nil, false
 }
@@ -1465,6 +1721,10 @@ func (m *UserMutation) Field(name string) (ent.Value, bool) {
 // or the query to the database was failed.
 func (m *UserMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
 	switch name {
+	case user.FieldMixedString:
+		return m.OldMixedString(ctx)
+	case user.FieldMixedEnum:
+		return m.OldMixedEnum(ctx)
 	case user.FieldAge:
 		return m.OldAge(ctx)
 	case user.FieldName:
@@ -1483,6 +1743,8 @@ func (m *UserMutation) OldField(ctx context.Context, name string) (ent.Value, er
 		return m.OldBlob(ctx)
 	case user.FieldState:
 		return m.OldState(ctx)
+	case user.FieldStatus:
+		return m.OldStatus(ctx)
 	}
 	return nil, fmt.Errorf("unknown User field %s", name)
 }
@@ -1492,6 +1754,20 @@ func (m *UserMutation) OldField(ctx context.Context, name string) (ent.Value, er
 // type mismatch the field type.
 func (m *UserMutation) SetField(name string, value ent.Value) error {
 	switch name {
+	case user.FieldMixedString:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMixedString(v)
+		return nil
+	case user.FieldMixedEnum:
+		v, ok := value.(user.MixedEnum)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMixedEnum(v)
+		return nil
 	case user.FieldAge:
 		v, ok := value.(int)
 		if !ok {
@@ -1555,6 +1831,13 @@ func (m *UserMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetState(v)
 		return nil
+	case user.FieldStatus:
+		v, ok := value.(user.Status)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStatus(v)
+		return nil
 	}
 	return fmt.Errorf("unknown User field %s", name)
 }
@@ -1612,6 +1895,9 @@ func (m *UserMutation) ClearedFields() []string {
 	if m.FieldCleared(user.FieldState) {
 		fields = append(fields, user.FieldState)
 	}
+	if m.FieldCleared(user.FieldStatus) {
+		fields = append(fields, user.FieldStatus)
+	}
 	return fields
 }
 
@@ -1638,6 +1924,9 @@ func (m *UserMutation) ClearField(name string) error {
 	case user.FieldState:
 		m.ClearState()
 		return nil
+	case user.FieldStatus:
+		m.ClearStatus()
+		return nil
 	}
 	return fmt.Errorf("unknown User nullable field %s", name)
 }
@@ -1647,6 +1936,12 @@ func (m *UserMutation) ClearField(name string) error {
 // defined in the schema.
 func (m *UserMutation) ResetField(name string) error {
 	switch name {
+	case user.FieldMixedString:
+		m.ResetMixedString()
+		return nil
+	case user.FieldMixedEnum:
+		m.ResetMixedEnum()
+		return nil
 	case user.FieldAge:
 		m.ResetAge()
 		return nil
@@ -1674,6 +1969,9 @@ func (m *UserMutation) ResetField(name string) error {
 	case user.FieldState:
 		m.ResetState()
 		return nil
+	case user.FieldStatus:
+		m.ResetStatus()
+		return nil
 	}
 	return fmt.Errorf("unknown User field %s", name)
 }
@@ -1681,12 +1979,15 @@ func (m *UserMutation) ResetField(name string) error {
 // AddedEdges returns all edge names that were set/added in this
 // mutation.
 func (m *UserMutation) AddedEdges() []string {
-	edges := make([]string, 0, 2)
+	edges := make([]string, 0, 3)
 	if m.car != nil {
 		edges = append(edges, user.EdgeCar)
 	}
 	if m.pets != nil {
 		edges = append(edges, user.EdgePets)
+	}
+	if m.friends != nil {
+		edges = append(edges, user.EdgeFriends)
 	}
 	return edges
 }
@@ -1705,6 +2006,12 @@ func (m *UserMutation) AddedIDs(name string) []ent.Value {
 		if id := m.pets; id != nil {
 			return []ent.Value{*id}
 		}
+	case user.EdgeFriends:
+		ids := make([]ent.Value, 0, len(m.friends))
+		for id := range m.friends {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
@@ -1712,9 +2019,12 @@ func (m *UserMutation) AddedIDs(name string) []ent.Value {
 // RemovedEdges returns all edge names that were removed in this
 // mutation.
 func (m *UserMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 2)
+	edges := make([]string, 0, 3)
 	if m.removedcar != nil {
 		edges = append(edges, user.EdgeCar)
+	}
+	if m.removedfriends != nil {
+		edges = append(edges, user.EdgeFriends)
 	}
 	return edges
 }
@@ -1729,6 +2039,12 @@ func (m *UserMutation) RemovedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case user.EdgeFriends:
+		ids := make([]ent.Value, 0, len(m.removedfriends))
+		for id := range m.removedfriends {
+			ids = append(ids, id)
+		}
+		return ids
 	}
 	return nil
 }
@@ -1736,7 +2052,7 @@ func (m *UserMutation) RemovedIDs(name string) []ent.Value {
 // ClearedEdges returns all edge names that were cleared in this
 // mutation.
 func (m *UserMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 2)
+	edges := make([]string, 0, 3)
 	if m.clearedpets {
 		edges = append(edges, user.EdgePets)
 	}
@@ -1774,6 +2090,9 @@ func (m *UserMutation) ResetEdge(name string) error {
 		return nil
 	case user.EdgePets:
 		m.ResetPets()
+		return nil
+	case user.EdgeFriends:
+		m.ResetFriends()
 		return nil
 	}
 	return fmt.Errorf("unknown User edge %s", name)

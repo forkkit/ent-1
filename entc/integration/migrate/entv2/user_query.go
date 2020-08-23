@@ -1,4 +1,4 @@
-// Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
+// Copyright 2019-present Facebook Inc. All rights reserved.
 // This source code is licensed under the Apache 2.0 license found
 // in the LICENSE file in the root directory of this source tree.
 
@@ -13,13 +13,13 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/facebookincubator/ent/dialect/sql"
-	"github.com/facebookincubator/ent/dialect/sql/sqlgraph"
-	"github.com/facebookincubator/ent/entc/integration/migrate/entv2/car"
-	"github.com/facebookincubator/ent/entc/integration/migrate/entv2/pet"
-	"github.com/facebookincubator/ent/entc/integration/migrate/entv2/predicate"
-	"github.com/facebookincubator/ent/entc/integration/migrate/entv2/user"
-	"github.com/facebookincubator/ent/schema/field"
+	"github.com/facebook/ent/dialect/sql"
+	"github.com/facebook/ent/dialect/sql/sqlgraph"
+	"github.com/facebook/ent/entc/integration/migrate/entv2/car"
+	"github.com/facebook/ent/entc/integration/migrate/entv2/pet"
+	"github.com/facebook/ent/entc/integration/migrate/entv2/predicate"
+	"github.com/facebook/ent/entc/integration/migrate/entv2/user"
+	"github.com/facebook/ent/schema/field"
 )
 
 // UserQuery is the builder for querying User entities.
@@ -31,9 +31,9 @@ type UserQuery struct {
 	unique     []string
 	predicates []predicate.User
 	// eager-loading edges.
-	withCar  *CarQuery
-	withPets *PetQuery
-	withFKs  bool
+	withCar     *CarQuery
+	withPets    *PetQuery
+	withFriends *UserQuery
 	// intermediate query (i.e. traversal path).
 	sql  *sql.Selector
 	path func(context.Context) (*sql.Selector, error)
@@ -91,7 +91,25 @@ func (uq *UserQuery) QueryPets() *PetQuery {
 		step := sqlgraph.NewStep(
 			sqlgraph.From(user.Table, user.FieldID, uq.sqlQuery()),
 			sqlgraph.To(pet.Table, pet.FieldID),
-			sqlgraph.Edge(sqlgraph.M2O, false, user.PetsTable, user.PetsColumn),
+			sqlgraph.Edge(sqlgraph.O2O, false, user.PetsTable, user.PetsColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(uq.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
+// QueryFriends chains the current query on the friends edge.
+func (uq *UserQuery) QueryFriends() *UserQuery {
+	query := &UserQuery{config: uq.config}
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := uq.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, uq.sqlQuery()),
+			sqlgraph.To(user.Table, user.FieldID),
+			sqlgraph.Edge(sqlgraph.M2M, false, user.FriendsTable, user.FriendsPrimaryKey...),
 		)
 		fromU = sqlgraph.SetNeighbors(uq.driver.Dialect(), step)
 		return fromU, nil
@@ -184,8 +202,8 @@ func (uq *UserQuery) OnlyID(ctx context.Context) (id int, err error) {
 	return
 }
 
-// OnlyXID is like OnlyID, but panics if an error occurs.
-func (uq *UserQuery) OnlyXID(ctx context.Context) int {
+// OnlyIDX is like OnlyID, but panics if an error occurs.
+func (uq *UserQuery) OnlyIDX(ctx context.Context) int {
 	id, err := uq.OnlyID(ctx)
 	if err != nil {
 		panic(err)
@@ -300,18 +318,29 @@ func (uq *UserQuery) WithPets(opts ...func(*PetQuery)) *UserQuery {
 	return uq
 }
 
+//  WithFriends tells the query-builder to eager-loads the nodes that are connected to
+// the "friends" edge. The optional arguments used to configure the query builder of the edge.
+func (uq *UserQuery) WithFriends(opts ...func(*UserQuery)) *UserQuery {
+	query := &UserQuery{config: uq.config}
+	for _, opt := range opts {
+		opt(query)
+	}
+	uq.withFriends = query
+	return uq
+}
+
 // GroupBy used to group vertices by one or more fields/columns.
 // It is often used with aggregate functions, like: count, max, mean, min, sum.
 //
 // Example:
 //
 //	var v []struct {
-//		Age int `json:"age,omitempty"`
+//		MixedString string `json:"mixed_string,omitempty"`
 //		Count int `json:"count,omitempty"`
 //	}
 //
 //	client.User.Query().
-//		GroupBy(user.FieldAge).
+//		GroupBy(user.FieldMixedString).
 //		Aggregate(entv2.Count()).
 //		Scan(ctx, &v)
 //
@@ -332,11 +361,11 @@ func (uq *UserQuery) GroupBy(field string, fields ...string) *UserGroupBy {
 // Example:
 //
 //	var v []struct {
-//		Age int `json:"age,omitempty"`
+//		MixedString string `json:"mixed_string,omitempty"`
 //	}
 //
 //	client.User.Query().
-//		Select(user.FieldAge).
+//		Select(user.FieldMixedString).
 //		Scan(ctx, &v)
 //
 func (uq *UserQuery) Select(field string, fields ...string) *UserSelect {
@@ -365,26 +394,17 @@ func (uq *UserQuery) prepareQuery(ctx context.Context) error {
 func (uq *UserQuery) sqlAll(ctx context.Context) ([]*User, error) {
 	var (
 		nodes       = []*User{}
-		withFKs     = uq.withFKs
 		_spec       = uq.querySpec()
-		loadedTypes = [2]bool{
+		loadedTypes = [3]bool{
 			uq.withCar != nil,
 			uq.withPets != nil,
+			uq.withFriends != nil,
 		}
 	)
-	if uq.withPets != nil {
-		withFKs = true
-	}
-	if withFKs {
-		_spec.Node.Columns = append(_spec.Node.Columns, user.ForeignKeys...)
-	}
 	_spec.ScanValues = func() []interface{} {
 		node := &User{config: uq.config}
 		nodes = append(nodes, node)
 		values := node.scanValues()
-		if withFKs {
-			values = append(values, node.fkValues()...)
-		}
 		return values
 	}
 	_spec.Assign = func(values ...interface{}) error {
@@ -431,26 +451,92 @@ func (uq *UserQuery) sqlAll(ctx context.Context) ([]*User, error) {
 	}
 
 	if query := uq.withPets; query != nil {
-		ids := make([]int, 0, len(nodes))
-		nodeids := make(map[int][]*User)
+		fks := make([]driver.Value, 0, len(nodes))
+		nodeids := make(map[int]*User)
 		for i := range nodes {
-			if fk := nodes[i].user_pets; fk != nil {
-				ids = append(ids, *fk)
-				nodeids[*fk] = append(nodeids[*fk], nodes[i])
-			}
+			fks = append(fks, nodes[i].ID)
+			nodeids[nodes[i].ID] = nodes[i]
 		}
-		query.Where(pet.IDIn(ids...))
+		query.withFKs = true
+		query.Where(predicate.Pet(func(s *sql.Selector) {
+			s.Where(sql.InValues(user.PetsColumn, fks...))
+		}))
 		neighbors, err := query.All(ctx)
 		if err != nil {
 			return nil, err
 		}
 		for _, n := range neighbors {
-			nodes, ok := nodeids[n.ID]
+			fk := n.owner_id
+			if fk == nil {
+				return nil, fmt.Errorf(`foreign-key "owner_id" is nil for node %v`, n.ID)
+			}
+			node, ok := nodeids[*fk]
 			if !ok {
-				return nil, fmt.Errorf(`unexpected foreign-key "user_pets" returned %v`, n.ID)
+				return nil, fmt.Errorf(`unexpected foreign-key "owner_id" returned %v for node %v`, *fk, n.ID)
+			}
+			node.Edges.Pets = n
+		}
+	}
+
+	if query := uq.withFriends; query != nil {
+		fks := make([]driver.Value, 0, len(nodes))
+		ids := make(map[int]*User, len(nodes))
+		for _, node := range nodes {
+			ids[node.ID] = node
+			fks = append(fks, node.ID)
+		}
+		var (
+			edgeids []int
+			edges   = make(map[int][]*User)
+		)
+		_spec := &sqlgraph.EdgeQuerySpec{
+			Edge: &sqlgraph.EdgeSpec{
+				Inverse: false,
+				Table:   user.FriendsTable,
+				Columns: user.FriendsPrimaryKey,
+			},
+			Predicate: func(s *sql.Selector) {
+				s.Where(sql.InValues(user.FriendsPrimaryKey[0], fks...))
+			},
+
+			ScanValues: func() [2]interface{} {
+				return [2]interface{}{&sql.NullInt64{}, &sql.NullInt64{}}
+			},
+			Assign: func(out, in interface{}) error {
+				eout, ok := out.(*sql.NullInt64)
+				if !ok || eout == nil {
+					return fmt.Errorf("unexpected id value for edge-out")
+				}
+				ein, ok := in.(*sql.NullInt64)
+				if !ok || ein == nil {
+					return fmt.Errorf("unexpected id value for edge-in")
+				}
+				outValue := int(eout.Int64)
+				inValue := int(ein.Int64)
+				node, ok := ids[outValue]
+				if !ok {
+					return fmt.Errorf("unexpected node id in edges: %v", outValue)
+				}
+				edgeids = append(edgeids, inValue)
+				edges[inValue] = append(edges[inValue], node)
+				return nil
+			},
+		}
+		if err := sqlgraph.QueryEdges(ctx, uq.driver, _spec); err != nil {
+			return nil, fmt.Errorf(`query edges "friends": %v`, err)
+		}
+		query.Where(user.IDIn(edgeids...))
+		neighbors, err := query.All(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, n := range neighbors {
+			nodes, ok := edges[n.ID]
+			if !ok {
+				return nil, fmt.Errorf(`unexpected "friends" node returned %v`, n.ID)
 			}
 			for i := range nodes {
-				nodes[i].Edges.Pets = n
+				nodes[i].Edges.Friends = append(nodes[i].Edges.Friends, n)
 			}
 		}
 	}
@@ -586,6 +672,32 @@ func (ugb *UserGroupBy) StringsX(ctx context.Context) []string {
 	return v
 }
 
+// String returns a single string from group-by. It is only allowed when querying group-by with one field.
+func (ugb *UserGroupBy) String(ctx context.Context) (_ string, err error) {
+	var v []string
+	if v, err = ugb.Strings(ctx); err != nil {
+		return
+	}
+	switch len(v) {
+	case 1:
+		return v[0], nil
+	case 0:
+		err = &NotFoundError{user.Label}
+	default:
+		err = fmt.Errorf("entv2: UserGroupBy.Strings returned %d results when one was expected", len(v))
+	}
+	return
+}
+
+// StringX is like String, but panics if an error occurs.
+func (ugb *UserGroupBy) StringX(ctx context.Context) string {
+	v, err := ugb.String(ctx)
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
 // Ints returns list of ints from group-by. It is only allowed when querying group-by with one field.
 func (ugb *UserGroupBy) Ints(ctx context.Context) ([]int, error) {
 	if len(ugb.fields) > 1 {
@@ -601,6 +713,32 @@ func (ugb *UserGroupBy) Ints(ctx context.Context) ([]int, error) {
 // IntsX is like Ints, but panics if an error occurs.
 func (ugb *UserGroupBy) IntsX(ctx context.Context) []int {
 	v, err := ugb.Ints(ctx)
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
+// Int returns a single int from group-by. It is only allowed when querying group-by with one field.
+func (ugb *UserGroupBy) Int(ctx context.Context) (_ int, err error) {
+	var v []int
+	if v, err = ugb.Ints(ctx); err != nil {
+		return
+	}
+	switch len(v) {
+	case 1:
+		return v[0], nil
+	case 0:
+		err = &NotFoundError{user.Label}
+	default:
+		err = fmt.Errorf("entv2: UserGroupBy.Ints returned %d results when one was expected", len(v))
+	}
+	return
+}
+
+// IntX is like Int, but panics if an error occurs.
+func (ugb *UserGroupBy) IntX(ctx context.Context) int {
+	v, err := ugb.Int(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -628,6 +766,32 @@ func (ugb *UserGroupBy) Float64sX(ctx context.Context) []float64 {
 	return v
 }
 
+// Float64 returns a single float64 from group-by. It is only allowed when querying group-by with one field.
+func (ugb *UserGroupBy) Float64(ctx context.Context) (_ float64, err error) {
+	var v []float64
+	if v, err = ugb.Float64s(ctx); err != nil {
+		return
+	}
+	switch len(v) {
+	case 1:
+		return v[0], nil
+	case 0:
+		err = &NotFoundError{user.Label}
+	default:
+		err = fmt.Errorf("entv2: UserGroupBy.Float64s returned %d results when one was expected", len(v))
+	}
+	return
+}
+
+// Float64X is like Float64, but panics if an error occurs.
+func (ugb *UserGroupBy) Float64X(ctx context.Context) float64 {
+	v, err := ugb.Float64(ctx)
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
 // Bools returns list of bools from group-by. It is only allowed when querying group-by with one field.
 func (ugb *UserGroupBy) Bools(ctx context.Context) ([]bool, error) {
 	if len(ugb.fields) > 1 {
@@ -643,6 +807,32 @@ func (ugb *UserGroupBy) Bools(ctx context.Context) ([]bool, error) {
 // BoolsX is like Bools, but panics if an error occurs.
 func (ugb *UserGroupBy) BoolsX(ctx context.Context) []bool {
 	v, err := ugb.Bools(ctx)
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
+// Bool returns a single bool from group-by. It is only allowed when querying group-by with one field.
+func (ugb *UserGroupBy) Bool(ctx context.Context) (_ bool, err error) {
+	var v []bool
+	if v, err = ugb.Bools(ctx); err != nil {
+		return
+	}
+	switch len(v) {
+	case 1:
+		return v[0], nil
+	case 0:
+		err = &NotFoundError{user.Label}
+	default:
+		err = fmt.Errorf("entv2: UserGroupBy.Bools returned %d results when one was expected", len(v))
+	}
+	return
+}
+
+// BoolX is like Bool, but panics if an error occurs.
+func (ugb *UserGroupBy) BoolX(ctx context.Context) bool {
+	v, err := ugb.Bool(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -716,6 +906,32 @@ func (us *UserSelect) StringsX(ctx context.Context) []string {
 	return v
 }
 
+// String returns a single string from selector. It is only allowed when selecting one field.
+func (us *UserSelect) String(ctx context.Context) (_ string, err error) {
+	var v []string
+	if v, err = us.Strings(ctx); err != nil {
+		return
+	}
+	switch len(v) {
+	case 1:
+		return v[0], nil
+	case 0:
+		err = &NotFoundError{user.Label}
+	default:
+		err = fmt.Errorf("entv2: UserSelect.Strings returned %d results when one was expected", len(v))
+	}
+	return
+}
+
+// StringX is like String, but panics if an error occurs.
+func (us *UserSelect) StringX(ctx context.Context) string {
+	v, err := us.String(ctx)
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
 // Ints returns list of ints from selector. It is only allowed when selecting one field.
 func (us *UserSelect) Ints(ctx context.Context) ([]int, error) {
 	if len(us.fields) > 1 {
@@ -731,6 +947,32 @@ func (us *UserSelect) Ints(ctx context.Context) ([]int, error) {
 // IntsX is like Ints, but panics if an error occurs.
 func (us *UserSelect) IntsX(ctx context.Context) []int {
 	v, err := us.Ints(ctx)
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
+// Int returns a single int from selector. It is only allowed when selecting one field.
+func (us *UserSelect) Int(ctx context.Context) (_ int, err error) {
+	var v []int
+	if v, err = us.Ints(ctx); err != nil {
+		return
+	}
+	switch len(v) {
+	case 1:
+		return v[0], nil
+	case 0:
+		err = &NotFoundError{user.Label}
+	default:
+		err = fmt.Errorf("entv2: UserSelect.Ints returned %d results when one was expected", len(v))
+	}
+	return
+}
+
+// IntX is like Int, but panics if an error occurs.
+func (us *UserSelect) IntX(ctx context.Context) int {
+	v, err := us.Int(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -758,6 +1000,32 @@ func (us *UserSelect) Float64sX(ctx context.Context) []float64 {
 	return v
 }
 
+// Float64 returns a single float64 from selector. It is only allowed when selecting one field.
+func (us *UserSelect) Float64(ctx context.Context) (_ float64, err error) {
+	var v []float64
+	if v, err = us.Float64s(ctx); err != nil {
+		return
+	}
+	switch len(v) {
+	case 1:
+		return v[0], nil
+	case 0:
+		err = &NotFoundError{user.Label}
+	default:
+		err = fmt.Errorf("entv2: UserSelect.Float64s returned %d results when one was expected", len(v))
+	}
+	return
+}
+
+// Float64X is like Float64, but panics if an error occurs.
+func (us *UserSelect) Float64X(ctx context.Context) float64 {
+	v, err := us.Float64(ctx)
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
 // Bools returns list of bools from selector. It is only allowed when selecting one field.
 func (us *UserSelect) Bools(ctx context.Context) ([]bool, error) {
 	if len(us.fields) > 1 {
@@ -773,6 +1041,32 @@ func (us *UserSelect) Bools(ctx context.Context) ([]bool, error) {
 // BoolsX is like Bools, but panics if an error occurs.
 func (us *UserSelect) BoolsX(ctx context.Context) []bool {
 	v, err := us.Bools(ctx)
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
+// Bool returns a single bool from selector. It is only allowed when selecting one field.
+func (us *UserSelect) Bool(ctx context.Context) (_ bool, err error) {
+	var v []bool
+	if v, err = us.Bools(ctx); err != nil {
+		return
+	}
+	switch len(v) {
+	case 1:
+		return v[0], nil
+	case 0:
+		err = &NotFoundError{user.Label}
+	default:
+		err = fmt.Errorf("entv2: UserSelect.Bools returned %d results when one was expected", len(v))
+	}
+	return
+}
+
+// BoolX is like Bool, but panics if an error occurs.
+func (us *UserSelect) BoolX(ctx context.Context) bool {
+	v, err := us.Bool(ctx)
 	if err != nil {
 		panic(err)
 	}
